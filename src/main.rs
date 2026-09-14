@@ -57,6 +57,12 @@ enum Command {
     },
     /// A GitHub pull request by number or URL through the gh CLI.
     Gh { pr: String },
+    /// Check every citation in specs and source against the repository.
+    Lint {
+        /// Print the per-requirement ledger of citing source files.
+        #[arg(long)]
+        coverage: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -75,6 +81,9 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     let Some(command) = cli.source else {
         return Ok(2);
     };
+    if let Command::Lint { coverage } = command {
+        return run_lint(&root, coverage, cli.output.format);
+    }
     let source: Box<dyn Source> = match command {
         Command::Change { name } => Box::new(ChangeSource {
             root: root.clone(),
@@ -93,6 +102,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             root: root.clone(),
             pr,
         }),
+        Command::Lint { .. } => unreachable!("handled above"),
     };
     let snapshot = source.fetch()?;
     let review = build_review(&root, &snapshot)?;
@@ -126,4 +136,29 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     };
     print!("{out}");
     Ok(code)
+}
+
+fn run_lint(
+    root: &std::path::Path,
+    coverage: bool,
+    format: Option<Format>,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    use openspec_reviewer::citations::{coverage::coverage as ledger, lint, require_config};
+    use openspec_reviewer::render::lint as render;
+    use openspec_reviewer::source::Workspace;
+    use std::io::Write;
+
+    let config = require_config(root)?;
+    let workspace = Workspace::load(root, &config.lint)?;
+    let report = lint(&workspace.input(), &config)?;
+    let ledger = coverage.then(|| ledger(&report.index));
+    match format {
+        Some(Format::Json) => print!("{}", render::render_json(&report, ledger.as_ref())),
+        _ => {
+            let out = render::render_text(&report, ledger.as_ref());
+            std::io::stderr().write_all(out.stderr.as_bytes())?;
+            print!("{}", out.stdout);
+        }
+    }
+    Ok(report.exit_code() as u8)
 }

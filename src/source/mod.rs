@@ -7,6 +7,7 @@ mod change;
 mod diff;
 mod gh;
 mod git;
+pub mod lint;
 mod repo;
 
 pub use archive::{load_archives, load_open_changes, Archive};
@@ -15,6 +16,7 @@ pub use change::ChangeSource;
 pub use diff::{parse_diff, DiffSource};
 pub use gh::GhSource;
 pub use git::GitSource;
+pub use lint::{Workspace, WorkspaceError};
 pub use repo::{repo_key, RepoIdentity};
 
 use std::path::PathBuf;

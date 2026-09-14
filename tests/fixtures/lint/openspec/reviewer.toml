@@ -1,0 +1,13 @@
+[lint]
+source_roots    = ["apps", "packages"]
+source_globs    = ["**/*.ts"]
+skip_dirs       = ["generated"]
+path_prefixes   = ["apps", "packages", ".github"]
+path_extensions = ["ts", "md", "yml"]
+test_pattern    = "bug__\\w+"
+cite_helper     = "cite"
+change_scopes   = ["rotation", "keyring"]
+grandfathered   = []
+
+[term_drift]
+max_common = 5

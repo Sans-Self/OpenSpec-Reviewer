@@ -191,6 +191,11 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                 ),
                 Span::raw(f.message.clone()),
             ]));
+            lines.extend(
+                f.details
+                    .iter()
+                    .map(|d| Line::styled(format!("    {d}"), palette.muted())),
+            );
         }
         if let Some(note) = &p.state.note {
             lines.push(Line::styled("✎ note", palette.heading()));

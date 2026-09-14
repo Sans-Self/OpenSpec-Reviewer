@@ -25,8 +25,11 @@ openspec-reviewer git feature/foo --base main  # two refs, no patching
 openspec-reviewer gh 224                       # a pull request through the gh CLI
 ```
 
-`lint --coverage`, the citation lint, is proposed in the
-`reviewer-citations` change and not built yet.
+```sh
+openspec-reviewer lint                         # every citation against the repository
+openspec-reviewer lint --coverage              # plus the per-requirement ledger of citing tests
+openspec-reviewer lint --format json
+```
 
 Interactive when stdout is a terminal. Plain text when piped, or with
 `--plain`; `--format json` for tooling and agents; `--format markdown`
@@ -87,6 +90,44 @@ equal on both sides print once, unmarked. Findings, the note and a
 one-line history follow each requirement. In the interactive view the
 same rows sit in a list on the left with the diff on the right; `?` lists
 the keys.
+
+## Citations
+
+Specs cite evidence and tests cite specs. A test title or a `cite()` call
+carrying `spec:<capability> § <requirement name>` must name a requirement
+that exists in canon or that an open change adds. A canon spec that names
+a path, a `bug__` regression test or a commit hash must name one that
+exists. `lint` checks both directions and, per open change, the blast
+radius: a REMOVED requirement something outside its capability still
+cites is an error, a MODIFIED one lists its citers as a note. The same
+results appear as findings on the matching rows when you review the
+change, with the citing files listed under the finding.
+
+The lint reads `openspec/reviewer.toml` and refuses to run without it.
+Every field is optional; a field left out switches that check off and is
+named in the summary line.
+
+```toml
+[lint]
+source_roots    = ["apps", "crates", "packages", "tests"]
+source_globs    = ["**/*.rs", "**/*.ts", "**/*.tsx"]
+skip_dirs       = ["node_modules", "target", "dist"]
+path_prefixes   = ["apps", "crates", "packages", "docs"]
+path_extensions = ["rs", "ts", "tsx", "md", "json", "yaml", "toml"]
+test_pattern    = "bug__\\w+"
+cite_helper     = "cite"          # cite('capability', 'Requirement name')
+change_scopes   = ["auth", "tree", "keyring"]
+grandfathered   = []
+
+[term_drift]
+max_common = 5
+```
+
+Term drift needs no configuration beyond `max_common`. When a change
+removes a backticked identifier, a quoted string or a phrase from a
+requirement and a canon requirement in another capability still uses it,
+the pairing gets a warning naming the sibling. A renamed requirement
+whose old name still appears in sibling prose gets the same.
 
 ## Development
 

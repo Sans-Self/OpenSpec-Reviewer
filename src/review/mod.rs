@@ -10,7 +10,7 @@ pub use diff::{
     diff_lines, diff_requirements, DiffLine, LineRole, ParaKind, RequirementDiff, ScenarioMatch,
     Span, SpanMark,
 };
-pub use findings::{collisions, Finding, FindingKind, Location, Severity, Summary};
+pub use findings::{collisions, Finding, FindingKind, Location, Severity, Sibling, Summary};
 pub use history::{collect_history, HistoryEntry};
 pub use pair::{inline_view, pair_change, CapabilityReview, ChangeReview, Pairing};
 

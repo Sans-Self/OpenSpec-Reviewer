@@ -211,3 +211,53 @@ pub fn stdout(out: &std::process::Output) -> String {
 pub fn stderr(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+impl Repo {
+    /// A fixture directory copied into a fresh repo and committed on `main`.
+    pub fn from_fixture(name: &str) -> Repo {
+        let repo = Repo::new();
+        copy_tree(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(name),
+            repo.root(),
+        );
+        repo.init_git("main");
+        repo
+    }
+
+    pub fn remove(&self, rel: &str) -> &Repo {
+        let path = self.root().join(rel);
+        if path.is_dir() {
+            std::fs::remove_dir_all(path).unwrap();
+        } else {
+            std::fs::remove_file(path).unwrap();
+        }
+        self
+    }
+
+    pub fn append(&self, rel: &str, text: &str) -> &Repo {
+        let path = self.root().join(rel);
+        let mut current = std::fs::read_to_string(&path).unwrap_or_default();
+        current.push_str(text);
+        std::fs::write(path, current).unwrap();
+        self
+    }
+
+    pub fn head(&self) -> String {
+        self.git(&["rev-parse", "HEAD"]).trim().to_string()
+    }
+}

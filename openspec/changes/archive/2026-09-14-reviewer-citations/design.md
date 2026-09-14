@@ -7,11 +7,17 @@ src/
   citations/
     mod.rs        Citation, Citer, CitationIndex
     grammar.rs    literal and call-form regexes
-    scan.rs       walk specs, deltas, source roots
-    evidence.rs   path, test-name, hash checks
+    scan.rs       fold spec, delta and source texts into the index
+    evidence.rs   path, test-name, hash checks behind a Probe trait
     radius.rs     REMOVED / MODIFIED blast radius per change
+    structure.rs  change directory markers, scopes, grandfathered names
     coverage.rs   the ledger
     config.rs     openspec/reviewer.toml
+    lint.rs       the report: findings, counts, summary line
+  source/
+    lint.rs       Workspace: the walk, the raw texts, the git probe
+  render/
+    lint.rs       stdout/stderr text and the JSON document
   drift/
     terms.rs      removed-term extraction in three tiers
     siblings.rs   search over canon and the change's own deltas
@@ -20,10 +26,14 @@ src/
     findings.rs   gains the citation and drift finding kinds
 ```
 
-`citations::scan` produces a `CitationIndex`; everything after it is a
-pure function over the index, canon and the open changes. The `lint`
-subcommand and the review join both consume the same index, so they
-cannot disagree.
+`source::lint::Workspace` reads the repository once: raw spec and delta
+texts, source files under the configured roots, the change directories.
+`citations::scan` folds those texts into a `CitationIndex`; everything
+after it is a pure function over the index, canon and the open changes.
+The two repository probes evidence needs, path existence and
+`git cat-file`, sit behind a `Probe` trait the workspace implements. The
+`lint` subcommand and the review join both consume the same index, so
+they cannot disagree.
 
 ## Index
 
@@ -65,10 +75,10 @@ Path and test-name detection use configured prefixes, extensions and
 pattern. The path regex uses a negative lookbehind for `[\w./-]` so a
 prefix starting with `.` still matches at a word boundary; `regex` has no
 lookbehind, so the port checks the preceding character by hand after a
-match. Test names are looked up with `git grep -q --fixed-strings` over
-the configured globs, the same call the script makes, because it is
-faster than walking and reading every file for each name. Hashes go to
-`git cat-file -e <hash>^{commit}`.
+match. Test names are looked up as fixed strings in the source texts the
+scan already read; the TypeScript lint shelled out to `git grep` because
+it never read source itself, and the second walk would buy nothing here.
+Hashes go to `git cat-file -e <hash>^{commit}`.
 
 ## Blast radius
 
@@ -98,7 +108,7 @@ path_prefixes    = ["apps", "packages", "docs", "bin", ".github", ".claude"]
 path_extensions  = ["ts", "tsx", "mts", "mjs", "md", "json", "css", "yml", "yaml"]
 test_pattern     = "bug__\\w+"
 cite_helper      = "cite"
-change_scopes    = ["ui", "energiehuis", "auth", "infra", "spec"]
+change_scopes    = ["ui", "billing", "auth", "infra", "spec"]
 grandfathered    = ["page-editor", "sitemap-dashboard"]
 ```
 
@@ -118,10 +128,11 @@ the toml from its JSON in one line of its own tooling.
 
 ## Source walk
 
-The `ignore` crate walks roots honouring `.gitignore`, which subsumes
-most of `skip_dirs`; the configured list is applied on top for
-directories that are committed but never contain citations. Globs are
-matched with `ignore`'s own `overrides`.
+The `ignore` crate walks roots honouring the repository's `.gitignore`,
+which subsumes most of `skip_dirs`; the configured list is applied on top
+for directories that are committed but never contain citations. Globs are
+matched with `ignore`'s own `overrides`. The user's global gitignore is
+not consulted: a lint result must not depend on whose machine it ran on.
 
 ## Review join
 
@@ -153,12 +164,15 @@ struct RemovedTerm { text: String, tier: Tier }
 - Backticked: every `` `…` `` span on the before side whose exact text
   does not occur on the after side.
 - Quoted: every `"…"` span, same rule.
-- Phrase: word n-grams for n in 2..=4 over the before side, minus any
-  n-gram present on the after side, minus n-grams that are all stop words
-  or spec keywords, minus n-grams shorter than 8 characters. Longer
-  n-grams that contain a surviving shorter one are kept; shorter n-grams
-  contained in a surviving longer one are dropped, so "status badge" is
-  reported once, not as "status", "badge" and "the status badge".
+- Phrase: adjacent word pairs of the before side that do not occur on
+  the after side, merged along the before text into maximal runs, each
+  run trimmed of stop words at both ends and kept when two or more words
+  and eight or more characters remain. A dropped "status badge" yields
+  exactly that phrase, once. A rewritten sentence yields one long run
+  that matches no sibling, which is the right answer: a rewrite is not
+  drift. Differencing n-grams of every length instead reports every
+  window around a phrase that in fact survived elsewhere on the after
+  side, as when it moves from the body into a scenario.
 
 The search is a case-insensitive substring match over each canon
 requirement's normalized text outside the pairing's capability, then
@@ -186,15 +200,22 @@ needs a pairing to know what was removed.
 | `regex` | The two citation grammars and the configured test pattern. |
 | `ignore` | Gitignore-aware directory walk with glob overrides. |
 
-The drift kinds carry the term and a `Vec<Sibling { capability, requirement, path }>`.
+The drift kinds carry the term and one `Sibling { capability, requirement, path }`
+each: the spec asks for one finding per term per sibling requirement, so
+a sibling list on a single finding would only be a second way to say it.
+Every finding also exposes `details()`, the lines renderers list under
+it: citing files for the citation kinds, the sibling's path for drift.
 
 ## Testing
 
-A fixture repository under `tests/fixtures/lint/` with two canon specs,
-one open change and a handful of source files, initialized as a git
-repository in a temp dir at test time so hash and `git grep` checks run
-for real. One test per requirement, the rel-monorepo edge cases as
-regression tests: apostrophe in a cited name, dotfile prefix, spec-first
-in-flight cite, grandfathered change removed. Drift is tested on the
-sitemap-labels fixture the foundation already carries: `mountType:
-'feature'` and "status badge" removed, a sibling that still has both.
+A fixture repository under `tests/fixtures/lint/`, shaped after Opake's
+key-rotation and keyring-tombstones specs: two canon specs, one open
+change, source under two roots with literal and call-form citations, a
+skipped directory and an `openspec/reviewer.toml`. It is copied into a
+temp dir and initialized as a git repository at test time so the hash
+check runs for real. One test per requirement, the edge cases the
+TypeScript lint earned as regression tests: apostrophe in a cited name,
+dotfile prefix, spec-first in-flight cite, stale grandfather entry. Drift
+is tested on `tests/fixtures/drift/`: a backticked identifier, a quoted
+string and a phrase removed from one key-rotation requirement while a
+keyring-tombstones requirement still carries all three.

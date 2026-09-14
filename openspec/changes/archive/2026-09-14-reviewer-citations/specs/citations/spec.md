@@ -180,7 +180,7 @@ grandfathered. A grandfathered name that no longer exists is an error.
 
 #### Scenario: Name outside the scopes
 
-- **GIVEN** scopes `ui` and `energiehuis`
+- **GIVEN** scopes `ui` and `billing`
 - **AND** a change named `menu-fix`
 - **WHEN** the lint runs
 - **THEN** it reports an error saying the name does not start with a

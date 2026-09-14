@@ -88,6 +88,9 @@ fn write_pairing(out: &mut String, p: &Pairing, colour: bool) {
             paint(colour, severity_code(f.severity), &f.severity.to_string()),
             f.message
         );
+        for d in &f.details {
+            let _ = writeln!(out, "        {d}");
+        }
     }
     if let Some(note) = &p.state.note {
         for (i, l) in note.lines().enumerate() {

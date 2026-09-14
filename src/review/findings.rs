@@ -28,13 +28,65 @@ pub enum FindingKind {
     ModifiedWithoutCanon,
     AddedAlreadyExists,
     RemovedWithoutCanon,
-    RenameSourceMissing { from: String },
+    RenameSourceMissing {
+        from: String,
+    },
     RenameTargetTaken,
-    ScenarioDropped { scenario: String },
+    ScenarioDropped {
+        scenario: String,
+    },
     RequirementWithoutScenario,
-    CrossChangeCollision { change: String },
+    CrossChangeCollision {
+        change: String,
+    },
     UnchangedModified,
-    HistoryUnreadable { archive: String, reason: String },
+    HistoryUnreadable {
+        archive: String,
+        reason: String,
+    },
+    /// A `spec:` citation in this requirement's text does not resolve.
+    CitationDangling {
+        citation: String,
+        reason: String,
+    },
+    /// REMOVED while a file outside the capability still cites it.
+    RemovedStillCited {
+        file: String,
+        citing_capability: Option<String>,
+    },
+    /// MODIFIED with citers outside the capability: the impact readout.
+    ModifiedHasCiters {
+        files: Vec<String>,
+    },
+    /// A canon requirement elsewhere still uses a term this pairing removes.
+    SiblingUsesRemoved {
+        term: String,
+        sibling: Sibling,
+        kept_in_delta: bool,
+    },
+    /// A canon requirement elsewhere still uses the name this pairing renames.
+    SiblingUsesOldName {
+        from: String,
+        sibling: Sibling,
+    },
+}
+
+/// A requirement in another capability, with the file it lives in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Sibling {
+    pub capability: String,
+    pub requirement: String,
+    pub path: String,
+}
+
+impl fmt::Display for Sibling {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} § {}  ({})",
+            self.capability, self.requirement, self.path
+        )
+    }
 }
 
 impl FindingKind {
@@ -45,13 +97,17 @@ impl FindingKind {
             | FindingKind::AddedAlreadyExists
             | FindingKind::RemovedWithoutCanon
             | FindingKind::RenameSourceMissing { .. }
-            | FindingKind::RenameTargetTaken => Severity::Error,
+            | FindingKind::RenameTargetTaken
+            | FindingKind::CitationDangling { .. }
+            | FindingKind::RemovedStillCited { .. } => Severity::Error,
             FindingKind::ScenarioDropped { .. }
             | FindingKind::RequirementWithoutScenario
-            | FindingKind::CrossChangeCollision { .. } => Severity::Warning,
-            FindingKind::UnchangedModified | FindingKind::HistoryUnreadable { .. } => {
-                Severity::Note
-            }
+            | FindingKind::CrossChangeCollision { .. }
+            | FindingKind::SiblingUsesRemoved { .. }
+            | FindingKind::SiblingUsesOldName { .. } => Severity::Warning,
+            FindingKind::UnchangedModified
+            | FindingKind::HistoryUnreadable { .. }
+            | FindingKind::ModifiedHasCiters { .. } => Severity::Note,
         }
     }
 
@@ -81,6 +137,52 @@ impl FindingKind {
             FindingKind::HistoryUnreadable { archive, reason } => {
                 format!("history skips {archive}: {reason}")
             }
+            FindingKind::CitationDangling { citation, reason } => {
+                format!("dangling citation `{citation}`: {reason}")
+            }
+            FindingKind::RemovedStillCited {
+                file,
+                citing_capability,
+            } => match citing_capability {
+                Some(cap) => {
+                    format!("removed but still cited by {file} (no delta for {cap} in this change)")
+                }
+                None => format!("removed but still cited by {file}"),
+            },
+            FindingKind::ModifiedHasCiters { files } => format!(
+                "modified while cited by {} file{} outside the capability",
+                files.len(),
+                if files.len() == 1 { "" } else { "s" },
+            ),
+            FindingKind::SiblingUsesRemoved {
+                term,
+                sibling,
+                kept_in_delta,
+            } => format!(
+                "sibling mentions removed term `{term}`: {} § {}{}",
+                sibling.capability,
+                sibling.requirement,
+                if *kept_in_delta {
+                    format!(" (the delta for {} still contains it)", sibling.capability)
+                } else {
+                    String::new()
+                }
+            ),
+            FindingKind::SiblingUsesOldName { from, sibling } => format!(
+                "sibling mentions old name `{from}`: {} § {}",
+                sibling.capability, sibling.requirement
+            ),
+        }
+    }
+
+    /// Lines listed under the finding: citing files, sibling locations.
+    pub fn details(&self) -> Vec<String> {
+        match self {
+            FindingKind::ModifiedHasCiters { files } => files.clone(),
+            FindingKind::RemovedStillCited { file, .. } => vec![file.clone()],
+            FindingKind::SiblingUsesRemoved { sibling, .. }
+            | FindingKind::SiblingUsesOldName { sibling, .. } => vec![sibling.path.clone()],
+            _ => Vec::new(),
         }
     }
 }
@@ -115,6 +217,8 @@ pub struct Finding {
     pub severity: Severity,
     pub location: Location,
     pub message: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub details: Vec<String>,
 }
 
 impl Finding {
@@ -128,11 +232,13 @@ impl Finding {
             },
             _ => location,
         };
+        let details = kind.details();
         Finding {
             kind,
             severity,
             location,
             message,
+            details,
         }
     }
 }

@@ -2,6 +2,7 @@
 
 pub mod colour;
 pub mod json;
+pub mod lint;
 pub mod markdown;
 pub mod text;
 pub mod tui;
