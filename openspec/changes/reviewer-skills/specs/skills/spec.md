@@ -7,21 +7,33 @@
 `openspec-reviewer skills install` MUST write each shipped skill to
 `.claude/skills/opsx-reviewer-<name>/SKILL.md` under the working
 directory, with frontmatter naming the skill `opsx-reviewer-<name>`, the
-tool version that wrote it, and a checksum of the body. A file whose
-body still matches its recorded checksum MUST be overwritten; a file
-that does not MUST be left unchanged and named in the output. Without
-a `.claude/` directory the command MUST refuse with an error naming it
-and exit `2`. `skills list` MUST print each skill's name, one line of
-description, and whether it is installed, up to date or edited.
+tool version that wrote it, and a checksum of the body. When `.agents/`
+exists the same file MUST also be written under
+`.agents/skills/opsx-reviewer-<name>/`; the command MUST NOT create
+`.agents/`. A file whose body still matches its recorded checksum MUST
+be overwritten; a file that does not MUST be left unchanged and named
+in the output. Without a `.claude/` directory the command MUST refuse
+with an error naming it and exit `2`. `skills list` MUST print each
+skill's name, one line of description, and whether it is installed, up
+to date or edited.
 
 #### Scenario: Fresh install
 
 - **GIVEN** a repository with a `.claude/` directory
+- **AND** no `.agents/` directory
 - **AND** no reviewer skills installed
 - **WHEN** the user runs `openspec-reviewer skills install`
-- **THEN** `.claude/skills/opsx-reviewer-define/SKILL.md` exists
-- **AND** three more skills exist beside it
-- **AND** stdout names the four files written
+- **THEN** `.claude/skills/opsx-reviewer-workflow/SKILL.md` exists
+- **AND** four more skills exist beside it
+- **AND** no `.agents/` directory exists
+- **AND** stdout names the files written
+
+#### Scenario: Other agents' directory present
+
+- **GIVEN** a repository with `.claude/` and `.agents/`
+- **WHEN** the user runs `openspec-reviewer skills install`
+- **THEN** `.agents/skills/opsx-reviewer-workflow/SKILL.md` exists
+- **AND** its body equals the one under `.claude/skills/`
 
 #### Scenario: Hand-edited skill is kept
 
@@ -36,6 +48,58 @@ description, and whether it is installed, up to date or edited.
 - **WHEN** the user runs `openspec-reviewer skills install`
 - **THEN** stderr names `.claude/`
 - **AND** the exit status is `2`
+
+### Requirement: User-callable skills get a command alias
+
+For each of `define`, `cite`, `crossref` and `triage`, install MUST
+write `.claude/commands/opsx-reviewer/<name>.md` whose body instructs
+the agent to load the `opsx-reviewer-<name>` skill and pass the
+command's arguments to it. The command file MUST carry the same version
+and checksum frontmatter as a skill and follow the same overwrite rule.
+No command MUST be written for `workflow`.
+
+#### Scenario: Four commands, not five
+
+- **GIVEN** a repository with a `.claude/` directory
+- **WHEN** the user runs `openspec-reviewer skills install`
+- **THEN** `.claude/commands/opsx-reviewer/` holds `define.md`, `cite.md`, `crossref.md` and `triage.md`
+- **AND** holds no `workflow.md`
+
+#### Scenario: Command defers to the skill
+
+- **WHEN** `.claude/commands/opsx-reviewer/triage.md` is read
+- **THEN** its body names the `opsx-reviewer-triage` skill
+- **AND** carries the arguments placeholder
+- **AND** carries none of the skill's own instructions
+
+### Requirement: The workflow skill tells an agent when to run the reviewer
+
+`opsx-reviewer-workflow` MUST have a description naming a repository
+with an `openspec/` directory and the `openspec-reviewer` binary as the
+condition for loading it, and MUST NOT opt out of model invocation. Its
+body MUST tell the agent to run `openspec-reviewer change <name>
+--format json` after editing a change's deltas and before archiving, to
+run `openspec-reviewer lint` after touching cited source or tests, how
+to read the summary line, what each finding kind and severity means,
+how to write a `spec:<capability> § <requirement>` citation, and which
+of `define`, `cite`, `crossref` and `triage` to load for each finding
+kind that is not a mechanical fix. It MUST state that the agent never
+edits `openspec/specs/`.
+
+#### Scenario: Every finding kind is explained
+
+- **WHEN** the workflow body is read
+- **THEN** every finding kind the review can emit appears in it
+- **AND** each has one sentence of meaning
+- **AND** each judgment kind names the skill that handles it
+
+#### Scenario: Agent finishes a delta
+
+- **GIVEN** an agent has edited `openspec/changes/<name>/specs/alpha/spec.md`
+- **AND** the workflow skill is loaded
+- **WHEN** the agent follows the skill
+- **THEN** it runs the review on `<name>` before proposing to archive
+- **AND** it runs no command that writes under `openspec/specs/`
 
 ### Requirement: A project can replace a skill's body
 
@@ -77,17 +141,24 @@ report them as dangling.
 
 ### Requirement: Every skill writes a change, never canon
 
-Each shipped skill MUST state in its first paragraph that it writes
-under `openspec/changes/`, or for `cite` into test files, and never
-under `openspec/specs/`, and MUST end by running the reviewer on what it
-wrote.
+Each shipped task skill MUST state in its first paragraph that it
+writes under `openspec/changes/`, or for `cite` into test files, and
+never under `openspec/specs/`, and MUST end by running the reviewer on
+what it wrote. The workflow skill MUST state that it writes nothing and
+name the skill that does for each kind of edit.
 
-#### Scenario: Shape of every skill
+#### Scenario: Shape of every task skill
 
-- **WHEN** the shipped skills are read
+- **WHEN** the shipped `define`, `cite`, `crossref` and `triage` skills are read
 - **THEN** each first paragraph names `openspec/changes/` or test files as its output
 - **AND** each names `openspec/specs/` as out of bounds
 - **AND** each ends with an `openspec-reviewer` command
+
+#### Scenario: Shape of the workflow skill
+
+- **WHEN** the shipped `workflow` skill is read
+- **THEN** its first paragraph says it writes nothing
+- **AND** it names `openspec/specs/` as out of bounds
 
 ### Requirement: The define skill drafts glossary terms
 
