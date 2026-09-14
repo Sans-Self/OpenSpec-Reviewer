@@ -37,6 +37,9 @@
             version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
+            # The source tests build throwaway repositories with git.
+            nativeCheckInputs = [ pkgs.git ];
+            preCheck = "export HOME=$TMPDIR";
             meta.mainProgram = "openspec-reviewer";
           };
         in

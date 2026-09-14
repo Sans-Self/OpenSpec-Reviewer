@@ -1,7 +1,8 @@
-# plain-output (delta)
+# plain-output Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change reviewer-foundation. Update Purpose after archive.
+## Requirements
 ### Requirement: Plain text is the default outside a terminal
 
 When stdout is not a terminal, or `--plain` is given, the tool MUST print
@@ -51,7 +52,7 @@ findings summary. Field names are stable within a major version.
 
 #### Scenario: Agent reads the review
 
-- **WHEN** an agent runs `openspec-reviewer change energiehuis-fork --format json`
+- **WHEN** an agent runs `openspec-reviewer change sweep-gate --format json`
 - **THEN** it can read each pairing's kind, before and after text
 - **AND** the findings
 - **AND** the approval state, without parsing prose
@@ -66,3 +67,4 @@ finding per line as `severity  change/capability/requirement: message`.
 - **WHEN** CI runs `openspec-reviewer diff --findings-only < pr.diff`
 - **THEN** the output is one line per finding plus the summary
 - **AND** the exit status follows the worst finding
+

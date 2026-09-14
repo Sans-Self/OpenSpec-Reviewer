@@ -221,8 +221,8 @@ No Markdown parser, no async runtime, no HTTP client.
 
 Fixtures are pairs of canon and delta strings under `tests/fixtures/`,
 with the expected pairing and findings next to them. The first fixture
-set is lifted from real changes in `rel-monorepo`: the sitemap-labels
-MODIFIED that motivated the tool, a RENAMED + MODIFIED pair, and a pure
-re-wrap that must show as unchanged. Sources are tested against a
+set comes from Opake's OpenSpec tree: a real open change whose MODIFIED
+restates a requirement to change a few words and add two scenarios, a
+RENAMED + MODIFIED pair, and a pure re-wrap that must show as unchanged. Sources are tested against a
 throwaway git repository built in a temp dir. Every requirement in the
 specs is cited from at least one test title.

@@ -60,8 +60,8 @@ directory. The snapshot has an after side only.
 
 #### Scenario: Existing change
 
-- **GIVEN** a repository with `openspec/changes/energiehuis-fork/`
-- **WHEN** the user runs `openspec-reviewer change energiehuis-fork`
+- **GIVEN** a repository with `openspec/changes/sweep-gate/`
+- **WHEN** the user runs `openspec-reviewer change sweep-gate`
 - **THEN** the review covers that change's deltas and artefacts as they
   are on disk
 
