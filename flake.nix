@@ -19,6 +19,13 @@
             inherit system;
             overlays = [ (import rust-overlay) ];
           }));
+      # OpenSpec CLI for openspec/ specs and changes. Not in nixpkgs; a
+      # version-pinned dlx wrapper gives every shell a bare `openspec`
+      # without making Node part of the project. First run downloads into
+      # pnpm's dlx cache; offline after.
+      openspecCli = pkgs: pkgs.writeShellScriptBin "openspec" ''
+        exec ${pkgs.pnpm}/bin/pnpm --silent dlx @fission-ai/openspec@1.6.0 "$@"
+      '';
     in
     {
       packages = forAll (pkgs:
@@ -45,6 +52,8 @@
               extensions = [ "rust-src" "rust-analyzer" ];
             })
             pkgs.gh
+            pkgs.git
+            (openspecCli pkgs)
           ];
         };
       });
