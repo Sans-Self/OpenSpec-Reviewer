@@ -460,3 +460,19 @@ fn definitions_findings_reach_plain_output_and_json__agent_reads_the_glossary() 
     assert!(only.contains("summary: 0 errors, 2 warnings"), "{only}");
     assert!(only.ends_with("glossary: 3 terms\n"), "{only}");
 }
+
+/// Backticked `spec:` citations were extracted as terms and reported as
+/// recurring or new terms without definition.
+#[test]
+fn bug__citations_counted_as_terms() {
+    let spans = openspec_reviewer::drift::terms::quoted_spans(
+        "See `spec:alpha § Some rule` and `realTerm`, also \"spec:beta § Other\".",
+    );
+    assert_eq!(spans.into_iter().collect::<Vec<_>>(), vec!["realTerm"]);
+    let repo = glossary_repo();
+    for cap in ["a", "b", "c"] {
+        repo.canon(cap, &format!("# {cap}\n\n## Requirements\n\n### Requirement: R\n\nSee `spec:key-rotation § Rotation produces a new group key`.\n\n#### Scenario: S\n\n- **WHEN** x\n- **THEN** y\n"));
+    }
+    let text = stdout(&run_in(repo.root(), &["lint"]));
+    assert!(!text.contains("definition: `spec:"), "{text}");
+}
