@@ -5,7 +5,9 @@
 The words this project uses, one requirement per term. The requirement
 name is the term, the body its meaning, the scenarios show it in a
 sentence, and a `- **Deprecated:**` line lists the words not to use for
-it. The reviewer reads this file as the glossary.
+it. The reviewer reads this file as the glossary: it finds defined terms
+and their synonyms anywhere in prose, and proposes new terms only from
+what specs already mark with backticks or double quotes.
 
 ## Requirements
 

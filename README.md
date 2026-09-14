@@ -144,7 +144,9 @@ other.
 
 The review warns when a delta uses a deprecated synonym or introduces a
 backticked or quoted term twice without defining it, and notes the
-requirements that use a term whose meaning a change edits. `lint` warns
+requirements that use a term whose meaning a change edits. The tool
+proposes only what specs already mark with backticks or double quotes,
+and finds defined terms and their synonyms anywhere in prose. `lint` warns
 on deprecated synonyms in canon, notes terms nobody uses, and notes
 spans that recur across capabilities without a definition. In the TUI,
 `D` opens the definitions of the terms the selected requirement uses.
