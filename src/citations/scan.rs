@@ -33,6 +33,9 @@ pub struct OpenChange {
 pub struct Sighting {
     pub file: PathBuf,
     pub citation: Citation,
+    /// The name stopped at a newline; if it dangles, wrapping is the
+    /// likely reason.
+    pub ends_at_line_break: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,6 +61,17 @@ pub fn reason(r: &Resolution, c: &Citation) -> String {
         }
         Resolution::Resolved => String::new(),
     }
+}
+
+pub const WRAP_HINT: &str = "; the name looks cut off by a line break, a backtick span may wrap";
+
+/// The reason, plus the wrap hint when the sighting ended at a newline.
+pub fn reason_for(s: &Sighting, r: &Resolution) -> String {
+    let mut text = reason(r, &s.citation);
+    if s.ends_at_line_break {
+        text.push_str(WRAP_HINT);
+    }
+    text
 }
 
 fn in_flight(changes: &[OpenChange]) -> BTreeSet<Citation> {
@@ -100,44 +114,41 @@ pub fn scan(
     };
     let mut sightings = Vec::new();
 
+    let literal = Grammar::new(None);
+    let sighting = |file: &PathBuf, found: &super::Found| Sighting {
+        file: file.clone(),
+        citation: found.citation.clone(),
+        ends_at_line_break: found.ends_at_line_break,
+    };
     for spec in specs {
-        for citation in Grammar::literal(&spec.text) {
+        for found in literal.found(&spec.text) {
             index
                 .citers
-                .entry(citation.clone())
+                .entry(found.citation.clone())
                 .or_default()
                 .push(Citer {
                     file: spec.path.clone(),
                     citing_capability: Some(spec.capability.clone()),
                 });
-            sightings.push(Sighting {
-                file: spec.path.clone(),
-                citation,
-            });
+            sightings.push(sighting(&spec.path, &found));
         }
     }
     for source in sources {
-        for citation in grammar.citations(&source.text) {
+        for found in grammar.found(&source.text) {
             index
                 .citers
-                .entry(citation.clone())
+                .entry(found.citation.clone())
                 .or_default()
                 .push(Citer {
                     file: source.path.clone(),
                     citing_capability: None,
                 });
-            sightings.push(Sighting {
-                file: source.path.clone(),
-                citation,
-            });
+            sightings.push(sighting(&source.path, &found));
         }
     }
     for delta in changes.iter().flat_map(|c| c.delta_files.iter()) {
-        for citation in Grammar::literal(&delta.text) {
-            sightings.push(Sighting {
-                file: delta.path.clone(),
-                citation,
-            });
+        for found in literal.found(&delta.text) {
+            sightings.push(sighting(&delta.path, &found));
         }
     }
     Scanned { index, sightings }

@@ -1,0 +1,3 @@
+[lint]
+source_roots = ["apps"]
+source_globs = ["**/*.ex", "**/*.exs"]

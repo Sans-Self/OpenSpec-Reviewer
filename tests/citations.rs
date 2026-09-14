@@ -630,3 +630,124 @@ fn lint_init_writes_a_starting_configuration__elixir_tests_are_scanned() {
         "_build is skipped: {globs:?}"
     );
 }
+
+#[test]
+fn a_citation_names_a_capability_and_a_requirement__backticked_citation_wraps() {
+    let cites = Grammar::literal(
+        "  the anchor rule, `spec:lineage § Lineage is\n  the chain's genesis URI`). This holds",
+    );
+    assert_eq!(
+        cites,
+        vec![Citation::new(
+            "lineage",
+            "Lineage is the chain's genesis URI"
+        )]
+    );
+    let unclosed = Grammar::literal("see `spec:lineage § Lineage is\n  the chain's genesis URI");
+    assert_eq!(
+        unclosed,
+        vec![Citation::new("lineage", "Lineage is")],
+        "no closing backtick: the line-bound grammar applies"
+    );
+}
+
+#[test]
+fn a_citation_names_a_capability_and_a_requirement__backticked_citation_wraps_inside_a_comment() {
+    let hash = Grammar::literal("# See `spec:lineage § Lineage is\n# the chain's genesis URI`.");
+    assert_eq!(hash[0].requirement, "Lineage is the chain's genesis URI");
+    let star =
+        Grammar::literal(" * See `spec:lineage § Lineage is\n *   the chain's genesis URI`.");
+    assert_eq!(star[0].requirement, "Lineage is the chain's genesis URI");
+    let slashes =
+        Grammar::literal("/// `spec:a § One two\n///   three` and //! `spec:a § Four\n//! five`");
+    assert_eq!(slashes[0].requirement, "One two three");
+    assert_eq!(slashes[1].requirement, "Four five");
+}
+
+#[test]
+fn a_citation_names_a_capability_and_a_requirement__sentence_final_punctuation() {
+    let cites =
+        Grammar::literal("See spec:alpha § Some rule.\nAnd \"spec:alpha § Other rule,\" too");
+    assert_eq!(cites[0].requirement, "Some rule");
+    assert_eq!(cites[1].requirement, "Other rule");
+    assert_eq!(
+        openspec_reviewer::citations::normalize_name("Ends in a question?"),
+        "Ends in a question?"
+    );
+}
+
+#[test]
+fn a_citation_must_resolve__bare_prose_wraps() {
+    let repo = Repo::from_fixture("lint");
+    repo.write(
+        "apps/web/test/wrapped.test.ts",
+        "// See spec:key-rotation § Members re-encrypt on their\n// next write.\n// And spec:key-rotation § Nope at all\n",
+    );
+    let out = lint_in(&repo, &[]);
+    let errs = errors(&out);
+    assert_eq!(errs.len(), 2, "{errs:?}");
+    let wrapped = errs
+        .iter()
+        .find(|e| e.contains("Members re-encrypt on their`"))
+        .unwrap();
+    assert!(
+        wrapped.contains("looks cut off by a line break"),
+        "{wrapped}"
+    );
+    assert!(wrapped.contains("a backtick span may wrap"), "{wrapped}");
+    let plain = errs.iter().find(|e| e.contains("Nope at all")).unwrap();
+    assert!(
+        plain.contains("looks cut off"),
+        "also at a line end: {plain}"
+    );
+    repo.write(
+        "apps/web/test/wrapped.test.ts",
+        "test(`spec:key-rotation § Nope at all`, () => {})\n",
+    );
+    let out = lint_in(&repo, &[]);
+    assert!(
+        !errors(&out)[0].contains("looks cut off"),
+        "closed by a delimiter: {:?}",
+        errors(&out)
+    );
+}
+
+#[test]
+fn a_citation_names_a_capability_and_a_requirement__opake_prose_fixture() {
+    let repo = Repo::from_fixture("prose");
+    let out = lint_in(&repo, &[]);
+    // The lineage spec cross-cites Opake capabilities the fixture does not
+    // carry; only the Elixir sources are under test here.
+    let errs: Vec<String> = errors(&out)
+        .into_iter()
+        .filter(|e| e.contains("apps/"))
+        .collect();
+    assert_eq!(errs.len(), 2, "the two bare wraps: {errs:?}");
+    assert!(
+        errs.iter()
+            .all(|e| e.contains("Unknown workspace is distinguishable from`")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter()
+            .all(|e| e.contains("looks cut off by a line break")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("record_queries.ex")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("workspace_controller.ex")),
+        "{errs:?}"
+    );
+    let ledger = stdout(&lint_in(&repo, &["--coverage"]));
+    assert!(
+        ledger.contains("[1] Lineage is the chain's genesis URI, carried on every supersede"),
+        "the wrapped backtick span resolved: {ledger}"
+    );
+    assert!(
+        ledger.contains("[1] indexed_at is first-seen"),
+        "sentence-final period dropped: {ledger}"
+    );
+}

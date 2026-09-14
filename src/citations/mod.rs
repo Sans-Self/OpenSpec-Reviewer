@@ -12,7 +12,7 @@ pub mod scan;
 pub mod structure;
 
 pub use config::{read_config, render, require_config, write_init, Config, ConfigError, Survey};
-pub use grammar::Grammar;
+pub use grammar::{Found, Grammar};
 pub use lint::{lint, LintFinding, LintReport};
 pub use scan::{scan, Scanned, SourceFile, SpecFile};
 
@@ -21,9 +21,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::PathBuf;
 
-/// Runs of whitespace compare as one space, in headings and citations alike.
+/// Runs of whitespace compare as one space, and sentence-final punctuation
+/// is not part of a name, in headings and citations alike.
 pub fn normalize_name(name: &str) -> String {
-    name.split_whitespace().collect::<Vec<_>>().join(" ")
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_end_matches(['.', ',', ';', ':'])
+        .to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
