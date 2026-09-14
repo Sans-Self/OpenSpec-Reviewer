@@ -41,7 +41,7 @@ key away.
 
 | Capability | Covers |
 | --- | --- |
-| `definitions` | The glossary shape, the four checks, the definitions panel, and configuration |
+| `glossary` | The glossary shape, the four checks, the definitions panel, and configuration. Named `glossary` so that `definitions`, the capability holding the terms themselves, stays free for them. |
 
 ## Non-goals
 

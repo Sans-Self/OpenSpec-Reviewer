@@ -4,10 +4,11 @@ use crate::citations::radius::blast_radius;
 use crate::citations::scan::{reason, scan, OpenChange, SpecFile};
 use crate::citations::{read_config, Config, ConfigError, Grammar, Resolution};
 use crate::drift::drift_findings;
+use crate::glossary::{self, Glossary};
 use crate::model::{load_change, Change, ChangeError};
 use crate::review::pair::requirement_text;
 use crate::review::{
-    collect_history, pair_change, CanonEdit, ChangeReview, Finding, FindingKind, Review,
+    collect_history, pair_change, CanonEdit, ChangeReview, Finding, FindingKind, Pairing, Review,
 };
 use crate::source::{
     load_archives, load_canon, load_open_changes, repo_key, CanonError, Snapshot, Workspace,
@@ -47,6 +48,18 @@ pub fn build_review(root: &Path, snapshot: &Snapshot) -> Result<Review, BuildErr
     let archives = load_archives(root);
 
     let config = read_config(root)?;
+    let definitions = config
+        .as_ref()
+        .map(|c| c.definitions.clone())
+        .unwrap_or_default();
+    let glossary = Glossary::build(
+        &canon,
+        &changes
+            .iter()
+            .flat_map(|c| c.deltas.iter().cloned())
+            .collect::<Vec<_>>(),
+        &definitions.capability,
+    );
     let citations = match &config {
         Some(c) => Some(Workspace::load(root, &c.lint)?),
         None => None,
@@ -70,12 +83,13 @@ pub fn build_review(root: &Path, snapshot: &Snapshot) -> Result<Review, BuildErr
                 let drift = drift_findings(p, &canon, &change.deltas, max_common);
                 p.findings.extend(drift);
             }
+            join_glossary(&mut review, change, &canon, &others, &definitions);
             review
         })
         .collect();
 
     let canon_edits = snapshot.canon_files().map(CanonEdit::from_file).collect();
-    Ok(Review::new(snapshot.origin.clone(), reviews, canon_edits))
+    Ok(Review::new(snapshot.origin.clone(), reviews, canon_edits).with_glossary(glossary))
 }
 
 /// The lint's view of the change under review: its deltas as the snapshot
@@ -160,6 +174,79 @@ fn join_citations(
         let (mine, rest): (Vec<Finding>, Vec<Finding>) =
             radius.into_iter().partition(|f| f.location == location);
         radius = rest;
+        p.findings.extend(mine);
+    }
+}
+
+/// The glossary checks that belong to the review of one change. Canon
+/// hits and unused terms land on the term's pairing when the change touches
+/// the term; the lint reports the rest.
+fn join_glossary(
+    review: &mut ChangeReview,
+    change: &Change,
+    canon: &crate::model::Canon,
+    others: &[(String, Vec<crate::model::DeltaSpec>)],
+    definitions: &crate::citations::config::Definitions,
+) {
+    let glossary = Glossary::build(canon, &change.deltas, &definitions.capability);
+    if glossary.is_empty() {
+        return;
+    }
+    let pairings: Vec<Pairing> = review.pairings().cloned().collect();
+    let refs: Vec<&Pairing> = pairings.iter().collect();
+    let mut extra: Vec<Finding> = glossary::deprecated_in_pairings(&glossary, &refs);
+    extra.extend(glossary::new_undefined(&glossary, &refs));
+    for p in &pairings {
+        extra.extend(glossary::term_in_use(&glossary, canon, p));
+    }
+    let open_deltas: Vec<crate::model::DeltaSpec> = others
+        .iter()
+        .flat_map(|(_, d)| d.iter().cloned())
+        .chain(change.deltas.iter().cloned())
+        .collect();
+    let unused: Vec<String> = glossary::unused_terms(&glossary, canon, &open_deltas)
+        .into_iter()
+        .map(|t| t.name.clone())
+        .collect();
+    let canon_hits = glossary::deprecated_in_canon(&glossary, canon);
+    for p in pairings
+        .iter()
+        .filter(|p| p.capability == glossary.capability)
+    {
+        if unused.iter().any(|u| u.eq_ignore_ascii_case(&p.name)) {
+            extra.push(Finding::new(FindingKind::DefinedButUnused, p.location()));
+        }
+        for hit in canon_hits
+            .iter()
+            .filter(|h| h.term.eq_ignore_ascii_case(&p.name))
+        {
+            let mut f = Finding::new(
+                FindingKind::UsesDeprecatedSynonym {
+                    synonym: hit.synonym.clone(),
+                    term: hit.term.clone(),
+                },
+                p.location(),
+            );
+            f.details = vec![format!(
+                "{} § {}{}",
+                hit.capability,
+                hit.requirement,
+                hit.scenario
+                    .as_ref()
+                    .map(|s| format!(" # {s}"))
+                    .unwrap_or_default()
+            )];
+            extra.push(f);
+        }
+    }
+    for p in review.pairings_mut() {
+        let location = p.location();
+        let (mine, rest): (Vec<Finding>, Vec<Finding>) = extra.into_iter().partition(|f| {
+            f.location.change == location.change
+                && f.location.capability == location.capability
+                && f.location.requirement == location.requirement
+        });
+        extra = rest;
         p.findings.extend(mine);
     }
 }

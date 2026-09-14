@@ -1,0 +1,43 @@
+# definitions
+
+## Purpose
+
+The words this project uses, one requirement per term. The body is the
+meaning, the scenarios show the word in a sentence, and the Deprecated
+line lists the words not to use for it.
+
+## Requirements
+
+### Requirement: group key
+
+The symmetric key that wraps a workspace's document content keys for the
+current rotation. Every member holds a wrap of it; rotation replaces it.
+
+- **Deprecated:** workspace key, rotation key
+
+#### Scenario: In a sentence
+
+- **WHEN** a member is removed
+- **THEN** the group key rotates
+
+### Requirement: manager
+
+The membership role that may add and remove members and author keyring
+supersedes. The other roles are editor and viewer; there is no owner
+role.
+
+- **Deprecated:** admin, owner
+
+#### Scenario: In a sentence
+
+- **WHEN** a manager removes a member
+- **THEN** the keyring head changes
+
+### Requirement: loket
+
+A counter where residents ask questions. Defined, used nowhere.
+
+#### Scenario: In a sentence
+
+- **WHEN** a resident visits the loket
+- **THEN** they are helped

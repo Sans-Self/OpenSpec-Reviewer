@@ -6,6 +6,7 @@ use super::radius::blast_radius;
 use super::scan::{reason, scan, OpenChange, SourceFile, SpecFile};
 use super::structure::{check_changes, ChangeDir};
 use super::{CitationIndex, Grammar};
+use crate::glossary::{self, Glossary};
 use crate::model::Canon;
 use crate::review::{Finding, Severity, Summary};
 use regex::Regex;
@@ -77,6 +78,8 @@ pub struct LintReport {
     pub summary: Summary,
     /// Config fields left out, named in the summary line.
     pub unconfigured: Vec<&'static str>,
+    /// `glossary: N terms` or `no glossary`.
+    pub glossary: String,
     #[serde(skip)]
     pub index: CitationIndex,
 }
@@ -101,6 +104,8 @@ impl LintReport {
                 self.unconfigured.join(", ")
             ));
         }
+        line.push_str("; ");
+        line.push_str(&self.glossary);
         line
     }
 
@@ -211,6 +216,59 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         );
     }
 
+    let glossary = Glossary::build(input.canon, &[], &config.definitions.capability);
+    let glossary_line = match glossary.terms.len() {
+        0 => "no glossary".to_string(),
+        1 => "glossary: 1 term".to_string(),
+        n => format!("glossary: {n} terms"),
+    };
+    if !glossary.is_empty() {
+        let spec_path = |cap: &str| format!("openspec/specs/{cap}/spec.md");
+        for hit in glossary::deprecated_in_canon(&glossary, input.canon) {
+            findings.push(LintFinding::new(
+                Severity::Warning,
+                spec_path(&hit.capability),
+                format!(
+                    "{} § {}{}: uses deprecated synonym `{}`, the term is `{}`",
+                    hit.capability,
+                    hit.requirement,
+                    hit.scenario
+                        .as_ref()
+                        .map(|s| format!(" # {s}"))
+                        .unwrap_or_default(),
+                    hit.synonym,
+                    hit.term
+                ),
+            ));
+        }
+        let open_deltas: Vec<crate::model::DeltaSpec> = input
+            .changes
+            .iter()
+            .flat_map(|c| c.deltas.iter().cloned())
+            .collect();
+        for term in glossary::unused_terms(&glossary, input.canon, &open_deltas) {
+            findings.push(LintFinding::new(
+                Severity::Note,
+                spec_path(&glossary.capability),
+                format!(
+                    "defined but unused: no requirement outside the glossary uses `{}`",
+                    term.name
+                ),
+            ));
+        }
+        for r in
+            glossary::recurring_undefined(&glossary, input.canon, config.definitions.min_recurrence)
+        {
+            let mut f = LintFinding::new(
+                Severity::Note,
+                spec_path(&glossary.capability),
+                format!("recurring term without definition: `{}`", r.term),
+            );
+            f.details = r.uses;
+            findings.push(f);
+        }
+    }
+
     let summary = findings.iter().fold(Summary::default(), |mut s, f| {
         match f.severity {
             Severity::Error => s.errors += 1,
@@ -228,6 +286,7 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         counts,
         summary,
         unconfigured,
+        glossary: glossary_line,
         index: scanned.index,
     })
 }

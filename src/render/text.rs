@@ -157,7 +157,12 @@ pub fn render(review: &Review, options: TextOptions) -> String {
             out.push('\n');
         }
     }
-    let _ = writeln!(out, "summary: {}", review.summary);
+    let _ = writeln!(
+        out,
+        "summary: {}; {}",
+        review.summary,
+        review.glossary_summary()
+    );
     out
 }
 
@@ -169,6 +174,11 @@ pub fn render_findings_only(review: &Review) -> String {
             let _ = writeln!(out, "{:<7}  {}: {}", f.severity, f.location, f.message);
         }
     }
-    let _ = writeln!(out, "summary: {}", review.summary);
+    let _ = writeln!(
+        out,
+        "summary: {}; {}",
+        review.summary,
+        review.glossary_summary()
+    );
     out
 }

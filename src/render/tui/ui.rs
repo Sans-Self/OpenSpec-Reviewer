@@ -202,6 +202,38 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
             lines.extend(note.lines().map(|l| Line::raw(format!("  {l}"))));
         }
         lines.push(Line::styled(history_summary(p), palette.muted()));
+        if app.definitions_shown() {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("definitions", palette.heading()));
+            let text = p
+                .after
+                .as_ref()
+                .or(p.before.as_ref())
+                .map(crate::review::pair::requirement_text)
+                .unwrap_or_default();
+            let terms = app.review.glossary.terms_in(&text);
+            if terms.is_empty() {
+                lines.push(Line::styled(
+                    "  no glossary term appears here",
+                    palette.muted(),
+                ));
+            }
+            for t in terms {
+                lines.push(Line::styled(
+                    format!("  {}", t.name),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ));
+                for l in crate::review::normalize::paragraphs(&t.meaning) {
+                    lines.push(Line::raw(format!("    {l}")));
+                }
+                if !t.deprecated.is_empty() {
+                    lines.push(Line::styled("    Deprecated:", palette.muted()));
+                    for d in &t.deprecated {
+                        lines.push(Line::styled(format!("      {d}"), palette.muted()));
+                    }
+                }
+            }
+        }
     } else if let Some(a) = app.artefact_at(row) {
         lines.extend(a.lines().iter().map(|l| styled_line(l, palette)));
         if let Some(note) = &a.state.note {

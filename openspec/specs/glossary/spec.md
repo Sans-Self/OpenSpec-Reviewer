@@ -1,7 +1,8 @@
-# definitions (delta)
+# glossary Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change reviewer-definitions. Update Purpose after archive.
+## Requirements
 ### Requirement: The glossary is a capability named definitions
 
 The tool MUST treat the canon spec `openspec/specs/definitions/spec.md`
@@ -76,7 +77,7 @@ change touches the term, and in `lint` otherwise.
 #### Scenario: Synonym inside a citation
 
 - **GIVEN** deprecated synonym `admin`
-- **AND** a delta containing `` `spec:x § Admin API mints invites` ``
+- **AND** a delta containing `` `spec:keyring-tombstones § Admin API mints invites` ``
 - **WHEN** the tool reviews the change
 - **THEN** it reports no finding for that citation
 
@@ -164,9 +165,9 @@ the new meaning still fits each use.
 #### Scenario: Meaning changes
 
 - **GIVEN** a change that modifies the term `group key`
-- **AND** four canon requirements using the word
+- **AND** two canon requirements using the word
 - **WHEN** the tool reviews the change
-- **THEN** the pairing has a note listing the four requirements
+- **THEN** the pairing has a note listing the two requirements
 
 ### Requirement: The detail pane can show the terms a pairing uses
 
@@ -200,3 +201,4 @@ top-level `definitions` array of term, meaning and deprecated synonyms.
 - **WHEN** an agent runs the tool with `--format json`
 - **THEN** the document has a `definitions` array
 - **AND** each entry has `term`, `meaning` and `deprecated`
+

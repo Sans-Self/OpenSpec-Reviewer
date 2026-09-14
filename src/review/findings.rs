@@ -69,6 +69,22 @@ pub enum FindingKind {
         from: String,
         sibling: Sibling,
     },
+    /// A word the glossary lists as deprecated, in this requirement's text.
+    UsesDeprecatedSynonym {
+        synonym: String,
+        term: String,
+    },
+    /// A glossary term no requirement outside the glossary uses.
+    DefinedButUnused,
+    /// A backticked or quoted span this change introduces and uses more
+    /// than once, with no glossary entry.
+    NewTermUndefined {
+        term: String,
+    },
+    /// A MODIFIED or RENAMED term: the canon requirements that use it.
+    TermInUse {
+        uses: Vec<String>,
+    },
 }
 
 /// A requirement in another capability, with the file it lives in.
@@ -104,10 +120,14 @@ impl FindingKind {
             | FindingKind::RequirementWithoutScenario
             | FindingKind::CrossChangeCollision { .. }
             | FindingKind::SiblingUsesRemoved { .. }
-            | FindingKind::SiblingUsesOldName { .. } => Severity::Warning,
+            | FindingKind::SiblingUsesOldName { .. }
+            | FindingKind::UsesDeprecatedSynonym { .. }
+            | FindingKind::NewTermUndefined { .. } => Severity::Warning,
             FindingKind::UnchangedModified
             | FindingKind::HistoryUnreadable { .. }
-            | FindingKind::ModifiedHasCiters { .. } => Severity::Note,
+            | FindingKind::ModifiedHasCiters { .. }
+            | FindingKind::DefinedButUnused
+            | FindingKind::TermInUse { .. } => Severity::Note,
         }
     }
 
@@ -172,6 +192,22 @@ impl FindingKind {
                 "sibling mentions old name `{from}`: {} § {}",
                 sibling.capability, sibling.requirement
             ),
+            FindingKind::UsesDeprecatedSynonym { synonym, term } => {
+                format!("uses deprecated synonym `{synonym}`, the term is `{term}`")
+            }
+            FindingKind::DefinedButUnused => {
+                format!(
+                    "defined but unused: no requirement outside the glossary uses `{requirement}`"
+                )
+            }
+            FindingKind::NewTermUndefined { term } => {
+                format!("new term without definition: `{term}`")
+            }
+            FindingKind::TermInUse { uses } => format!(
+                "term in use by {} requirement{}",
+                uses.len(),
+                if uses.len() == 1 { "" } else { "s" }
+            ),
         }
     }
 
@@ -182,6 +218,7 @@ impl FindingKind {
             FindingKind::RemovedStillCited { file, .. } => vec![file.clone()],
             FindingKind::SiblingUsesRemoved { sibling, .. }
             | FindingKind::SiblingUsesOldName { sibling, .. } => vec![sibling.path.clone()],
+            FindingKind::TermInUse { uses } => uses.clone(),
             _ => Vec::new(),
         }
     }

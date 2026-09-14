@@ -364,7 +364,7 @@ fn the_lint_is_a_subcommand_with_a_summary__clean_repository() {
         .to_string();
     assert_eq!(
         line,
-        "lint: 2 specs, 1 changes, 1 paths, 1 tests, 0 hashes, 6 citations checked, 0 errors"
+        "lint: 2 specs, 1 changes, 1 paths, 1 tests, 0 hashes, 6 citations checked, 0 errors; no glossary"
     );
     assert_eq!(out.status.code(), Some(0));
 }

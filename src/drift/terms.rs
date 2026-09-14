@@ -18,6 +18,16 @@ pub struct RemovedTerm {
     pub text: String,
 }
 
+/// Every backticked span and double-quoted string in `text`, the two tiers
+/// the glossary checks and term drift share.
+pub fn quoted_spans(text: &str) -> BTreeSet<String> {
+    let backtick = Regex::new("`([^`\n]+)`").expect("compiles");
+    let quoted = Regex::new("\"([^\"\n]+)\"").expect("compiles");
+    let mut out = spans(&backtick, text);
+    out.extend(spans(&quoted, text));
+    out
+}
+
 fn spans(re: &Regex, text: &str) -> BTreeSet<String> {
     re.captures_iter(text)
         .map(|c| c[1].trim().to_string())

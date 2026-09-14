@@ -72,6 +72,16 @@ pub struct Review {
     pub changes: Vec<ChangeReview>,
     pub canon_edits: Vec<CanonEdit>,
     pub summary: Summary,
+    /// The project's glossary, as the change under review leaves it.
+    #[serde(rename = "definitions", serialize_with = "terms_only")]
+    pub glossary: crate::glossary::Glossary,
+}
+
+fn terms_only<S: serde::Serializer>(
+    g: &crate::glossary::Glossary,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    g.terms.serialize(s)
 }
 
 impl Review {
@@ -82,6 +92,21 @@ impl Review {
             changes,
             canon_edits,
             summary,
+            glossary: crate::glossary::Glossary::default(),
+        }
+    }
+
+    pub fn with_glossary(mut self, glossary: crate::glossary::Glossary) -> Review {
+        self.glossary = glossary;
+        self
+    }
+
+    /// `glossary: 2 terms`, or `no glossary`, for summary lines.
+    pub fn glossary_summary(&self) -> String {
+        match self.glossary.terms.len() {
+            0 => "no glossary".to_string(),
+            1 => "glossary: 1 term".to_string(),
+            n => format!("glossary: {n} terms"),
         }
     }
 

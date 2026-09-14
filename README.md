@@ -133,6 +133,28 @@ requirement and a canon requirement in another capability still uses it,
 the pairing gets a warning naming the sibling. A renamed requirement
 whose old name still appears in sibling prose gets the same.
 
+## Glossary
+
+`openspec/specs/definitions/spec.md` is the project's glossary when it
+exists. Each requirement is a term: the name is the word, the body its
+meaning, the scenarios usage examples, and a `- **Deprecated:** old word,
+other word` line lists the words not to use for it. Because a term is an
+ordinary requirement it is cited, renamed, diffed and tracked like any
+other.
+
+The review warns when a delta uses a deprecated synonym or introduces a
+backticked or quoted term twice without defining it, and notes the
+requirements that use a term whose meaning a change edits. `lint` warns
+on deprecated synonyms in canon, notes terms nobody uses, and notes
+spans that recur across capabilities without a definition. In the TUI,
+`D` opens the definitions of the terms the selected requirement uses.
+
+```toml
+[definitions]
+capability     = "definitions"   # which capability is the glossary
+min_recurrence = 3               # how often an undefined span must recur
+```
+
 ## Development
 
 ```sh

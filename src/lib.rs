@@ -7,6 +7,7 @@
 pub mod build;
 pub mod citations;
 pub mod drift;
+pub mod glossary;
 pub mod model;
 pub mod render;
 pub mod review;
