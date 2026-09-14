@@ -1,0 +1,30 @@
+schema: spec-driven
+
+context: |
+  Rust CLI/TUI (clap + ratatui). Functional style, failures as values
+  (Result with typed error enums), side effects at the edges. Blocking
+  I/O; no async runtime.
+  Prose follows Oxford spelling; openspec artefacts follow ISO 24495-1
+  plain language. Requirement names are short, active, and citable.
+
+rules:
+  specs:
+    - One condition per keyword line. A scenario is a list of `- **GIVEN**`,
+      `- **WHEN**`, `- **THEN**` lines. A second condition or outcome goes on
+      its own `- **AND**` line. Never join two conditions with "and", a
+      comma, or a dash inside one WHEN or THEN.
+    - GIVEN is state that already holds. WHEN is the one action or event.
+      THEN is what the reviewer can observe. Each is one short sentence.
+    - Requirement names are plain active sentences a test title can quote.
+    - Use MUST and MUST NOT for rules. Avoid SHALL and SHOULD.
+    - Name the thing: a path, a key, a flag. No "appropriate", "properly",
+      "as expected".
+  proposal:
+    - Say what the change is, why now, and what it does not do. Under
+      600 words.
+  design:
+    - Record the decision and the reason. Do not list rejected options
+      unless the rejection is the point.
+  tasks:
+    - Each task is a repo-observable outcome. No branch names, no dates,
+      no session mechanics.

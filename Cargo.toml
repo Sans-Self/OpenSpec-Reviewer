@@ -1,0 +1,29 @@
+[package]
+name = "openspec-reviewer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Noï van Mondfrans"]
+description = "Review OpenSpec changes as the semantic diff they are, not the file diff git shows"
+
+[[bin]]
+name = "openspec-reviewer"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+crossterm = "0.28"
+similar = { version = "2", features = ["inline"] }
+diffy = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+directories = "6"
+toml = "0.8"
+regex = "1"
+ignore = "0.4"
+
+[profile.release]
+strip = true
+lto = "thin"
