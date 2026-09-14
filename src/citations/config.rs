@@ -85,6 +85,7 @@ test_pattern    = "bug__\\w+"
 max_common = 5
 
 # The glossary capability and how often an undefined span must recur.
+# An empty capability switches the glossary checks off.
 [definitions]
 capability     = "definitions"
 min_recurrence = 3

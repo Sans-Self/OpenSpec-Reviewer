@@ -153,7 +153,7 @@ spans that recur across capabilities without a definition. In the TUI,
 
 ```toml
 [definitions]
-capability     = "definitions"   # which capability is the glossary
+capability     = "definitions"   # which capability is the glossary; "" switches it off
 min_recurrence = 3               # how often an undefined span must recur
 ```
 

@@ -116,6 +116,17 @@ fn the_glossary_is_a_capability_named_definitions__configurable_capability() {
     );
     let out = run_in(repo.root(), &["--findings-only", "change", "epoch-retire"]);
     assert!(stdout(&out).contains("; no glossary"), "{}", stdout(&out));
+    repo.write(
+        "openspec/reviewer.toml",
+        "[lint]\n\n[definitions]\ncapability = \"\"\n",
+    );
+    let off = run_in(repo.root(), &["--findings-only", "change", "epoch-retire"]);
+    assert!(
+        stdout(&off).contains("; no glossary"),
+        "an empty capability switches it off: {}",
+        stdout(&off)
+    );
+    assert!(!stdout(&off).contains("synonym"), "{}", stdout(&off));
 }
 
 #[test]
