@@ -16,7 +16,7 @@ pub use change::ChangeSource;
 pub use diff::{parse_diff, DiffSource};
 pub use gh::GhSource;
 pub use git::GitSource;
-pub use lint::{Workspace, WorkspaceError};
+pub use lint::{survey, Workspace, WorkspaceError};
 pub use repo::{repo_key, RepoIdentity};
 
 use std::path::PathBuf;

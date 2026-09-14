@@ -506,3 +506,127 @@ fn citation_findings_join_the_review__no_config_no_citation_findings() {
     );
     assert!(!stdout(&out).contains("cited"), "{}", stdout(&out));
 }
+
+#[test]
+fn lint_init_writes_a_starting_configuration__fresh_repository() {
+    let repo = Repo::new();
+    repo.write("crates/a/src/x.rs", "fn main() {}\n")
+        .write("apps/web/y.tsx", "export {}\n")
+        .write("apps/web/node_modules/dep/z.py", "pass\n");
+    let out = lint_in(&repo, &["init"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "openspec/reviewer.toml");
+    let text = std::fs::read_to_string(repo.root().join("openspec/reviewer.toml")).unwrap();
+    let config = openspec_reviewer::citations::config::parse_config(
+        std::path::Path::new("openspec/reviewer.toml"),
+        &text,
+    )
+    .expect("written file parses");
+    assert_eq!(
+        config.lint.source_roots,
+        Some(vec!["apps".into(), "crates".into()])
+    );
+    let exts = config.lint.path_extensions.unwrap();
+    assert!(
+        exts.contains(&"rs".to_string()) && exts.contains(&"tsx".to_string()),
+        "{exts:?}"
+    );
+    assert!(
+        !exts.contains(&"py".to_string()),
+        "skipped directories are not surveyed: {exts:?}"
+    );
+    assert_eq!(config.lint.test_pattern.as_deref(), Some("bug__\\w+"));
+    assert!(config.lint.change_scopes.is_none());
+}
+
+#[test]
+fn lint_init_writes_a_starting_configuration__config_already_exists() {
+    let repo = Repo::from_fixture("lint");
+    let before = std::fs::read_to_string(repo.root().join("openspec/reviewer.toml")).unwrap();
+    let out = lint_in(&repo, &["init"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        stderr(&out).contains("openspec/reviewer.toml"),
+        "{}",
+        stderr(&out)
+    );
+    let after = std::fs::read_to_string(repo.root().join("openspec/reviewer.toml")).unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn lint_init_writes_a_starting_configuration__no_openspec_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_in(dir.path(), &["lint", "init"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("openspec/"), "{}", stderr(&out));
+    assert!(!dir.path().join("openspec/reviewer.toml").exists());
+}
+
+#[test]
+fn lint_init_writes_a_starting_configuration__written_file_lints() {
+    let repo = Repo::from_fixture("lint");
+    repo.remove("openspec/reviewer.toml");
+    assert_eq!(lint_in(&repo, &["init"]).status.code(), Some(0));
+    let out = lint_in(&repo, &[]);
+    assert!(!stderr(&out).contains("reviewer.toml"), "{}", stderr(&out));
+    assert!(stdout(&out).contains("lint:"), "{}", stdout(&out));
+}
+
+#[test]
+fn lint_init_writes_a_starting_configuration__example_matches_the_schema() {
+    use openspec_reviewer::citations::{render, Survey};
+    let text = render(&Survey::example());
+    openspec_reviewer::citations::config::parse_config(std::path::Path::new("x"), &text)
+        .expect("the refusal's example parses");
+    let empty = render(&Survey::default());
+    let config =
+        openspec_reviewer::citations::config::parse_config(std::path::Path::new("x"), &empty)
+            .expect("an empty survey still renders valid toml");
+    assert_eq!(config.lint.source_roots, Some(vec![]));
+    assert!(empty.contains("No source directory found"));
+}
+
+#[test]
+fn lint_init_writes_a_starting_configuration__json_is_cited_but_not_scanned() {
+    let repo = Repo::new();
+    repo.write("src/a.rs", "fn main() {}\n")
+        .write("src/fixtures/b.json", "{}\n");
+    assert_eq!(lint_in(&repo, &["init"]).status.code(), Some(0));
+    let text = std::fs::read_to_string(repo.root().join("openspec/reviewer.toml")).unwrap();
+    let config = openspec_reviewer::citations::config::parse_config(
+        std::path::Path::new("openspec/reviewer.toml"),
+        &text,
+    )
+    .unwrap();
+    assert!(config
+        .lint
+        .path_extensions
+        .unwrap()
+        .contains(&"json".to_string()));
+    assert!(!config
+        .lint
+        .source_globs
+        .unwrap()
+        .contains(&"**/*.json".to_string()));
+}
+
+#[test]
+fn lint_init_writes_a_starting_configuration__elixir_tests_are_scanned() {
+    let repo = Repo::new();
+    repo.write("test/keyring_test.exs", "# spec:x § Y\n")
+        .write("test/_build/dev/z.py", "pass\n");
+    assert_eq!(lint_in(&repo, &["init"]).status.code(), Some(0));
+    let text = std::fs::read_to_string(repo.root().join("openspec/reviewer.toml")).unwrap();
+    let config = openspec_reviewer::citations::config::parse_config(
+        std::path::Path::new("openspec/reviewer.toml"),
+        &text,
+    )
+    .unwrap();
+    let globs = config.lint.source_globs.unwrap();
+    assert!(globs.contains(&"**/*.exs".to_string()), "{globs:?}");
+    assert!(
+        !globs.contains(&"**/*.py".to_string()),
+        "_build is skipped: {globs:?}"
+    );
+}

@@ -4,7 +4,9 @@
 
 use super::canon::CanonError;
 use super::load_canon;
-use crate::citations::config::Lint;
+use crate::citations::config::{
+    Lint, Survey, CANDIDATE_EXTENSIONS, CANDIDATE_ROOTS, DEFAULT_SKIP_DIRS,
+};
 use crate::citations::evidence::Probe;
 use crate::citations::scan::{OpenChange, SourceFile, SpecFile};
 use crate::citations::structure::ChangeDir;
@@ -207,5 +209,47 @@ impl Probe for Workspace {
             .current_dir(&self.root)
             .output()
             .is_ok_and(|o| o.status.success())
+    }
+}
+
+/// What `lint init` can measure before any configuration exists: which
+/// candidate roots are present and which candidate extensions appear
+/// under them. One pass per root, stopping when every candidate is seen.
+pub fn survey(root: &Path) -> Survey {
+    let roots: Vec<String> = CANDIDATE_ROOTS
+        .iter()
+        .filter(|r| root.join(r).is_dir())
+        .map(|r| r.to_string())
+        .collect();
+    let mut extensions = std::collections::BTreeSet::new();
+    for r in &roots {
+        let mut builder = WalkBuilder::new(root.join(r));
+        builder
+            .hidden(false)
+            .git_global(false)
+            .git_exclude(false)
+            .require_git(false)
+            .filter_entry(|e| {
+                !(e.file_type().is_some_and(|t| t.is_dir())
+                    && DEFAULT_SKIP_DIRS.contains(&e.file_name().to_string_lossy().as_ref()))
+            });
+        for entry in builder.build().flatten() {
+            if extensions.len() == CANDIDATE_EXTENSIONS.len() {
+                break;
+            }
+            if !entry.file_type().is_some_and(|t| t.is_file()) {
+                continue;
+            }
+            if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
+                if CANDIDATE_EXTENSIONS.contains(&ext) {
+                    extensions.insert(ext.to_string());
+                }
+            }
+        }
+    }
+    Survey {
+        roots,
+        extensions,
+        has_docs: root.join("docs").is_dir(),
     }
 }

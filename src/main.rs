@@ -62,7 +62,15 @@ enum Command {
         /// Print the per-requirement ledger of citing source files.
         #[arg(long)]
         coverage: bool,
+        #[command(subcommand)]
+        action: Option<LintAction>,
     },
+}
+
+#[derive(Subcommand)]
+enum LintAction {
+    /// Write openspec/reviewer.toml from what the repository contains.
+    Init,
 }
 
 fn main() -> ExitCode {
@@ -81,8 +89,18 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     let Some(command) = cli.source else {
         return Ok(2);
     };
-    if let Command::Lint { coverage } = command {
-        return run_lint(&root, coverage, cli.output.format);
+    if let Command::Lint { coverage, action } = command {
+        return match action {
+            Some(LintAction::Init) => {
+                let path = openspec_reviewer::citations::write_init(
+                    &root,
+                    &openspec_reviewer::source::survey(&root),
+                )?;
+                println!("{}", path.display());
+                Ok(0)
+            }
+            None => run_lint(&root, coverage, cli.output.format),
+        };
     }
     let source: Box<dyn Source> = match command {
         Command::Change { name } => Box::new(ChangeSource {

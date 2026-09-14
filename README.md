@@ -26,6 +26,7 @@ openspec-reviewer gh 224                       # a pull request through the gh C
 ```
 
 ```sh
+openspec-reviewer lint init                    # write openspec/reviewer.toml from the tree
 openspec-reviewer lint                         # every citation against the repository
 openspec-reviewer lint --coverage              # plus the per-requirement ledger of citing tests
 openspec-reviewer lint --format json
@@ -104,8 +105,11 @@ results appear as findings on the matching rows when you review the
 change, with the citing files listed under the finding.
 
 The lint reads `openspec/reviewer.toml` and refuses to run without it.
-Every field is optional; a field left out switches that check off and is
-named in the summary line.
+`openspec-reviewer lint init` writes one from what the repository
+contains: the source directories that exist among the usual names, the
+file extensions found under them, and commented examples for the fields
+it cannot measure. Every field is optional; a field left out switches
+that check off and is named in the summary line.
 
 ```toml
 [lint]

@@ -11,7 +11,7 @@ pub mod radius;
 pub mod scan;
 pub mod structure;
 
-pub use config::{read_config, require_config, Config, ConfigError};
+pub use config::{read_config, render, require_config, write_init, Config, ConfigError, Survey};
 pub use grammar::Grammar;
 pub use lint::{lint, LintFinding, LintReport};
 pub use scan::{scan, Scanned, SourceFile, SpecFile};
