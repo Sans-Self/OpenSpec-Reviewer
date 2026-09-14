@@ -106,6 +106,94 @@ impl fmt::Display for Sibling {
 }
 
 impl FindingKind {
+    /// One finding of every kind, for checks that sweep the closed set,
+    /// such as the workflow skill naming each. The match below is the
+    /// guard: a new variant fails to compile until it is added here.
+    pub fn each() -> Vec<FindingKind> {
+        let sibling = Sibling {
+            capability: "beta".into(),
+            requirement: "Entries are appended to the ledger".into(),
+            path: "openspec/specs/beta/spec.md".into(),
+        };
+        let all = vec![
+            FindingKind::ModifiedWithoutCanon,
+            FindingKind::AddedAlreadyExists,
+            FindingKind::RemovedWithoutCanon,
+            FindingKind::RenameSourceMissing { from: "old".into() },
+            FindingKind::RenameTargetTaken,
+            FindingKind::ScenarioDropped {
+                scenario: "gone".into(),
+            },
+            FindingKind::RequirementWithoutScenario,
+            FindingKind::CrossChangeCollision {
+                change: "other".into(),
+            },
+            FindingKind::UnchangedModified,
+            FindingKind::HistoryUnreadable {
+                archive: "a".into(),
+                reason: "r".into(),
+            },
+            FindingKind::CitationDangling {
+                citation: "c".into(),
+                reason: "r".into(),
+            },
+            FindingKind::RemovedStillCited {
+                file: "f".into(),
+                citing_capability: None,
+            },
+            FindingKind::ModifiedHasCiters { files: Vec::new() },
+            FindingKind::SiblingUsesRemoved {
+                term: "ledger".into(),
+                sibling: sibling.clone(),
+                kept_in_delta: false,
+            },
+            FindingKind::SiblingUsesOldName {
+                from: "old".into(),
+                sibling,
+            },
+            FindingKind::UsesDeprecatedSynonym {
+                synonym: "s".into(),
+                term: "t".into(),
+            },
+            FindingKind::DefinedButUnused,
+            FindingKind::NewTermUndefined { term: "t".into() },
+            FindingKind::TermInUse { uses: Vec::new() },
+        ];
+        for kind in &all {
+            match kind {
+                FindingKind::ModifiedWithoutCanon
+                | FindingKind::AddedAlreadyExists
+                | FindingKind::RemovedWithoutCanon
+                | FindingKind::RenameSourceMissing { .. }
+                | FindingKind::RenameTargetTaken
+                | FindingKind::ScenarioDropped { .. }
+                | FindingKind::RequirementWithoutScenario
+                | FindingKind::CrossChangeCollision { .. }
+                | FindingKind::UnchangedModified
+                | FindingKind::HistoryUnreadable { .. }
+                | FindingKind::CitationDangling { .. }
+                | FindingKind::RemovedStillCited { .. }
+                | FindingKind::ModifiedHasCiters { .. }
+                | FindingKind::SiblingUsesRemoved { .. }
+                | FindingKind::SiblingUsesOldName { .. }
+                | FindingKind::UsesDeprecatedSynonym { .. }
+                | FindingKind::DefinedButUnused
+                | FindingKind::NewTermUndefined { .. }
+                | FindingKind::TermInUse { .. } => {}
+            }
+        }
+        all
+    }
+
+    /// The `kind` tag as JSON shows it.
+    pub fn name(&self) -> String {
+        let value = serde_json::to_value(self).expect("finding kind serializes");
+        value["kind"]
+            .as_str()
+            .expect("finding kind is tagged")
+            .to_string()
+    }
+
     /// Findings of one kind always have the same severity.
     pub fn severity(&self) -> Severity {
         match self {

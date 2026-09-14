@@ -137,7 +137,8 @@ report them as dangling.
 
 - **GIVEN** a repository whose canon has no `glossary` capability
 - **WHEN** the user runs `openspec-reviewer skills install`
-- **THEN** no installed skill contains `spec:`
+- **THEN** no installed skill contains a citation the lint would check
+- **AND** the "Depends on" names are still there as plain text
 
 ### Requirement: Every skill writes a change, never canon
 

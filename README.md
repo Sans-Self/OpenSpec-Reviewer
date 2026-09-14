@@ -157,6 +157,36 @@ capability     = "definitions"   # which capability is the glossary; "" switches
 min_recurrence = 3               # how often an undefined span must recur
 ```
 
+## Skills
+
+`openspec-reviewer skills install` writes five skills an agent loads to
+work with the reviewer. `opsx-reviewer-workflow` is for the agent: it
+loads on its own in a repository with `openspec/` and the binary, and
+says when to run the review and the lint, what every finding kind means,
+how to write a citation, and which skill to reach for next. The other
+four are for you and the agent both, each with a `/opsx-reviewer:<name>`
+command:
+
+- `define` drafts glossary terms from the lint's recurring undefined
+  terms, into a new change.
+- `cite` adds `spec:` citations to the tests that already exercise
+  uncited requirements.
+- `crossref` judges the siblings a change puts in question, quotes the
+  archived decision if there was one, and drafts sibling deltas into the
+  change.
+- `triage` walks a change's findings in severity order and applies the
+  usual fix to the change's deltas, on confirmation, routing judgment to
+  crossref.
+
+The skills go to `.claude/skills/` and, when `.agents/` exists, to
+`.agents/skills/` for Codex, OpenCode and omp; the commands go to
+`.claude/commands/opsx-reviewer/`. Install never creates `.agents/` and
+refuses without `.claude/`. A file you edit by hand is kept on the next
+install and named; `skills list` shows each file's state. To rewrite a
+skill's instructions for one project, put the body at
+`openspec/reviewer/skills/<name>.md`; the shipped frontmatter stays.
+Every skill writes into a change, never into `openspec/specs/`.
+
 ## Development
 
 ```sh

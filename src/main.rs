@@ -65,6 +65,19 @@ enum Command {
         #[command(subcommand)]
         action: Option<LintAction>,
     },
+    /// Agent skills that call the reviewer: install them or list their state.
+    Skills {
+        #[command(subcommand)]
+        action: SkillsAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillsAction {
+    /// Write the skills into .claude/skills/, and .agents/skills/ when it exists.
+    Install,
+    /// Name every skill and command with whether it is installed, up to date or edited.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -102,6 +115,9 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             None => run_lint(&root, coverage, cli.output.format),
         };
     }
+    if let Command::Skills { action } = command {
+        return run_skills(&root, action);
+    }
     let source: Box<dyn Source> = match command {
         Command::Change { name } => Box::new(ChangeSource {
             root: root.clone(),
@@ -120,7 +136,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             root: root.clone(),
             pr,
         }),
-        Command::Lint { .. } => unreachable!("handled above"),
+        Command::Lint { .. } | Command::Skills { .. } => unreachable!("handled above"),
     };
     let snapshot = source.fetch()?;
     let review = build_review(&root, &snapshot)?;
@@ -179,4 +195,46 @@ fn run_lint(
         }
     }
     Ok(report.exit_code() as u8)
+}
+
+fn run_skills(
+    root: &std::path::Path,
+    action: SkillsAction,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    use openspec_reviewer::skills::{FileKind, FileState};
+    use openspec_reviewer::source::skills;
+
+    match action {
+        SkillsAction::Install => {
+            for p in skills::install(root)? {
+                match p.state {
+                    FileState::Edited => {
+                        println!(
+                            "kept  {} (edited by hand; differs from what the tool wrote)",
+                            p.path
+                        )
+                    }
+                    _ => println!("wrote {}", p.path),
+                }
+            }
+        }
+        SkillsAction::List => {
+            for p in skills::listed(root)? {
+                let kind = match p.kind {
+                    FileKind::Skill => "skill",
+                    FileKind::Command => "command",
+                };
+                let first_sentence = p
+                    .skill
+                    .description
+                    .split_once(". ")
+                    .map_or(p.skill.description, |(head, _)| head);
+                println!(
+                    "{kind:<7} {:<14} {}\n        {first_sentence}",
+                    p.state, p.path
+                );
+            }
+        }
+    }
+    Ok(0)
 }

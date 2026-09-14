@@ -12,7 +12,7 @@ pub const CONFIG_PATH: &str = "openspec/reviewer.toml";
 /// under them. Anything outside these lists is not a citation target the
 /// lint knows what to do with.
 pub const CANDIDATE_ROOTS: &[&str] = &[
-    "src", "lib", "apps", "packages", "crates", "services", "tests", "test",
+    "src", "lib", "apps", "packages", "crates", "services", "tests", "test", ".claude", ".agents",
 ];
 pub const CANDIDATE_EXTENSIONS: &[&str] = &[
     "rs", "ts", "tsx", "js", "mjs", "mts", "py", "go", "ex", "exs", "heex", "md", "json", "yaml",
