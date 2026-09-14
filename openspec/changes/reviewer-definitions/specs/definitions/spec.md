@@ -15,7 +15,7 @@ in `openspec/reviewer.toml`.
 #### Scenario: Two terms in canon
 
 - **GIVEN** `openspec/specs/definitions/spec.md` with requirements
-  `module` and `website`
+  `group key` and `manager`
 - **WHEN** the tool loads canon
 - **THEN** the glossary has two terms
 - **AND** each term has the body of its requirement as meaning
@@ -36,9 +36,9 @@ shows it as a list.
 
 #### Scenario: Two synonyms
 
-- **GIVEN** a term whose body has `- **Deprecated:** feature, feature mount`
+- **GIVEN** a term whose body has `- **Deprecated:** workspace key, rotation key`
 - **WHEN** the tool parses the term
-- **THEN** its deprecated synonyms are `feature` and `feature mount`
+- **THEN** its deprecated synonyms are `workspace key` and `rotation key`
 
 #### Scenario: No Deprecated line
 
@@ -57,26 +57,26 @@ requirement or scenario containing it. A hit in a delta is reported on
 that pairing; a hit in canon is reported on the term's pairing when the
 change touches the term, and in `lint` otherwise.
 
-#### Scenario: Delta says feature mount
+#### Scenario: Delta says workspace key
 
-- **GIVEN** a glossary term `module` with deprecated synonym
-  `feature mount`
-- **AND** a delta scenario saying "when a route is a feature mount"
+- **GIVEN** a glossary term `group key` with deprecated synonym
+  `workspace key`
+- **AND** a delta scenario saying "when the workspace key rotates"
 - **WHEN** the tool reviews the change
-- **THEN** that pairing has a warning naming `feature mount` and `module`
+- **THEN** that pairing has a warning naming `workspace key` and `group key`
 - **AND** naming the scenario
 
 #### Scenario: Synonym is a substring
 
-- **GIVEN** deprecated synonym `feature`
-- **AND** a delta containing the word `featured`
+- **GIVEN** deprecated synonym `admin`
+- **AND** a delta containing the word `administrative`
 - **WHEN** the tool reviews the change
 - **THEN** it reports no finding for that word
 
 #### Scenario: Synonym inside a citation
 
-- **GIVEN** deprecated synonym `feature`
-- **AND** a delta containing `` `spec:x § Feature mount appears` ``
+- **GIVEN** deprecated synonym `admin`
+- **AND** a delta containing `` `spec:x § Admin API mints invites` ``
 - **WHEN** the tool reviews the change
 - **THEN** it reports no finding for that citation
 
@@ -163,7 +163,7 @@ the new meaning still fits each use.
 
 #### Scenario: Meaning changes
 
-- **GIVEN** a change that modifies the term `module`
+- **GIVEN** a change that modifies the term `group key`
 - **AND** four canon requirements using the word
 - **WHEN** the tool reviews the change
 - **THEN** the pairing has a note listing the four requirements
@@ -177,10 +177,10 @@ order of first appearance. When no term appears the panel says so.
 
 #### Scenario: Pairing uses two terms
 
-- **GIVEN** a pairing whose after text contains `module` and `website`
+- **GIVEN** a pairing whose after text contains `group key` and `manager`
 - **AND** both are glossary terms
 - **WHEN** the reviewer presses `D`
-- **THEN** the panel lists `module` then `website`
+- **THEN** the panel lists `group key` then `manager`
 - **AND** shows each meaning
 
 #### Scenario: Toggle off

@@ -32,8 +32,8 @@
 
 ## 4. Wrap-up
 
-- [ ] 4.1 Fixture glossary and canon lifted from rel-monorepo's
-      module and website renames.
+- [ ] 4.1 Fixture glossary and canon lifted from Opake's group key and
+      manager vocabulary.
 - [ ] 4.2 Every requirement cited from at least one test title.
 - [ ] 4.3 A starter `openspec/specs/definitions/spec.md` for this
       repository itself: pairing, snapshot, source, finding, canon.
