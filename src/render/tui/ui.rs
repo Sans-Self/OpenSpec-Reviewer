@@ -226,6 +226,12 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                 for l in crate::review::normalize::paragraphs(&t.meaning) {
                     lines.push(Line::raw(format!("    {l}")));
                 }
+                if !t.admitted.is_empty() {
+                    lines.push(Line::styled("    Admitted:", palette.muted()));
+                    for a in &t.admitted {
+                        lines.push(Line::styled(format!("      {a}"), palette.muted()));
+                    }
+                }
                 if !t.deprecated.is_empty() {
                     lines.push(Line::styled("    Deprecated:", palette.muted()));
                     for d in &t.deprecated {

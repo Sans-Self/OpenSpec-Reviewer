@@ -12,6 +12,7 @@ lazy path.
 
 - **WHEN** a rotation is retired
 - **THEN** its tombstone names that `epochNumber`
+- **AND** the supersede log gains an entry
 
 ### Requirement: Clients act on the outcome, never on URI matching
 

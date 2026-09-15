@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use openspec_reviewer::glossary::{parse_deprecated, Glossary, Matcher};
+use openspec_reviewer::glossary::{parse_markers, Glossary, Matcher};
 use openspec_reviewer::model::Canon;
 
 fn glossary_repo() -> Repo {
@@ -69,7 +69,7 @@ fn findings_of<'a>(doc: &'a serde_json::Value, requirement: &str) -> Vec<&'a ser
 fn the_glossary_is_a_capability_named_definitions__two_terms_in_canon() {
     let canon = glossary_canon();
     let g = Glossary::build(&canon, &[], "definitions");
-    assert_eq!(g.terms.len(), 3);
+    assert_eq!(g.terms.len(), 4);
     let key = g.get("group key").unwrap();
     assert!(key.meaning.starts_with("The symmetric key that wraps"));
     assert!(
@@ -80,7 +80,7 @@ fn the_glossary_is_a_capability_named_definitions__two_terms_in_canon() {
     assert_eq!(key.deprecated, vec!["workspace key", "rotation key"]);
     let doc = review_json(&glossary_repo(), "epoch-retire");
     let defs = doc["definitions"].as_array().expect("definitions array");
-    assert_eq!(defs.len(), 3);
+    assert_eq!(defs.len(), 4);
     assert_eq!(defs[0]["term"], "group key");
     assert!(defs[0]["meaning"].is_string());
     assert_eq!(defs[1]["deprecated"], serde_json::json!(["admin", "owner"]));
@@ -131,17 +131,90 @@ fn the_glossary_is_a_capability_named_definitions__configurable_capability() {
 
 #[test]
 fn a_term_lists_the_words_not_to_use_for_it__two_synonyms() {
-    let (meaning, deprecated) =
-        parse_deprecated("The key.\n\n- **Deprecated:** workspace key, rotation key\n");
-    assert_eq!(meaning, "The key.");
-    assert_eq!(deprecated, vec!["workspace key", "rotation key"]);
+    let m = parse_markers("The key.\n\n- **Deprecated:** workspace key, rotation key\n");
+    assert_eq!(m.meaning, "The key.");
+    assert_eq!(m.deprecated, vec!["workspace key", "rotation key"]);
 }
 
 #[test]
 fn a_term_lists_the_words_not_to_use_for_it__no_deprecated_line() {
-    let (meaning, deprecated) = parse_deprecated("Just a meaning.\n");
-    assert_eq!(meaning, "Just a meaning.");
-    assert!(deprecated.is_empty());
+    let m = parse_markers("Just a meaning.\n");
+    assert_eq!(m.meaning, "Just a meaning.");
+    assert!(m.deprecated.is_empty());
+}
+
+#[test]
+fn a_term_lists_the_words_that_are_acceptable_for_it__two_admitted_synonyms() {
+    let m = parse_markers("The role.\n\n- **Admitted:** steward, custodian\n");
+    assert_eq!(m.meaning, "The role.");
+    assert_eq!(m.admitted, vec!["steward", "custodian"]);
+}
+
+#[test]
+fn a_term_lists_the_words_that_are_acceptable_for_it__no_admitted_line() {
+    assert!(parse_markers("Just a meaning.\n").admitted.is_empty());
+}
+
+#[test]
+fn a_term_lists_the_words_that_are_acceptable_for_it__both_lines() {
+    let m = parse_markers(
+        "The role.\n\n- **Admitted:** steward\n- **Deprecated:** admin\n\nMore prose.\n",
+    );
+    assert_eq!(m.meaning, "The role.\n\nMore prose.");
+    assert_eq!(m.admitted, vec!["steward"]);
+    assert_eq!(m.deprecated, vec!["admin"]);
+}
+
+#[test]
+fn a_term_lists_the_words_that_are_acceptable_for_it__unrecognized_bold_line() {
+    let m = parse_markers("The role.\n\n- **Example:** a steward of the keyring\n");
+    assert!(
+        m.meaning
+            .contains("- **Example:** a steward of the keyring"),
+        "an author's own bullet is prose: {}",
+        m.meaning
+    );
+    assert!(m.admitted.is_empty());
+}
+
+#[test]
+fn a_term_lists_the_words_that_are_acceptable_for_it__using_an_admitted_synonym() {
+    let repo = glossary_repo();
+    repo.delta(
+        "epoch-retire",
+        "sharing-grants",
+        "## MODIFIED Requirements\n\n### Requirement: A grant names its chain head\n\nA grant MUST name the chain head it was issued under.\n\n#### Scenario: Steward issues\n\n- **WHEN** a steward issues a grant\n- **THEN** the grant names the chain head\n",
+    );
+    let doc = review_json(&repo, "epoch-retire");
+    let fs = findings_of(&doc, "A grant names its chain head");
+    assert!(
+        fs.iter()
+            .all(|f| f["synonym"] != "steward" && f["term"] != "steward"),
+        "an admitted synonym is never a finding: {fs:#?}"
+    );
+}
+
+#[test]
+fn a_term_lists_the_words_that_are_acceptable_for_it__word_on_both_lines() {
+    let repo = glossary_repo();
+    let mut defs = fixture("glossary", "definitions.md");
+    defs = defs.replace(
+        "- **Deprecated:** admin, owner",
+        "- **Deprecated:** admin, steward",
+    );
+    repo.canon("definitions", &defs);
+    repo.delta(
+        "epoch-retire",
+        "sharing-grants",
+        "## MODIFIED Requirements\n\n### Requirement: A grant names its chain head\n\nA grant MUST name the chain head it was issued under.\n\n#### Scenario: Steward issues\n\n- **WHEN** a steward issues a grant\n- **THEN** the grant names the chain head\n",
+    );
+    let doc = review_json(&repo, "epoch-retire");
+    let fs = findings_of(&doc, "A grant names its chain head");
+    let hit = fs
+        .iter()
+        .find(|f| f["kind"] == "uses_deprecated_synonym" && f["synonym"] == "steward")
+        .unwrap_or_else(|| panic!("the contradiction is shown, not resolved: {fs:#?}"));
+    assert_eq!(hit["term"], "manager");
 }
 
 #[test]
@@ -249,6 +322,16 @@ fn a_term_nobody_uses_is_a_note__orphan_term() {
 }
 
 #[test]
+fn a_term_nobody_uses_is_a_note__used_only_under_an_admitted_synonym() {
+    let repo = glossary_repo();
+    let lint = stdout(&run_in(repo.root(), &["lint"]));
+    assert!(
+        !lint.contains("uses `ledger`"),
+        "canon says `log`, never `ledger`: {lint}"
+    );
+}
+
+#[test]
 fn a_recurring_undefined_term_is_a_note__identifier_in_three_capabilities() {
     let repo = glossary_repo();
     let text = stdout(&run_in(repo.root(), &["lint"]));
@@ -284,6 +367,19 @@ fn a_recurring_undefined_term_is_a_note__recurring_inside_one_capability() {
     repo.canon("alpha", &spec);
     let text = stdout(&run_in(repo.root(), &["lint"]));
     assert!(!text.contains("`localOnly`"), "{text}");
+}
+
+#[test]
+fn a_recurring_undefined_term_is_a_note__recurring_admitted_synonym() {
+    let repo = glossary_repo();
+    for cap in ["a", "b", "c"] {
+        repo.canon(cap, &format!("# {cap}\n\n## Requirements\n\n### Requirement: R {cap}\n\nThe `steward` decides.\n\n#### Scenario: S\n\n- **WHEN** x\n- **THEN** y\n"));
+    }
+    let text = stdout(&run_in(repo.root(), &["lint"]));
+    assert!(
+        !text.contains("definition: `steward`"),
+        "an admitted synonym is known: {text}"
+    );
 }
 
 #[test]
@@ -325,7 +421,7 @@ fn a_change_that_introduces_an_undefined_term_is_a_warning__new_term_defined_in_
     );
     assert_eq!(
         doc["definitions"].as_array().unwrap().len(),
-        4,
+        5,
         "the new term is in the glossary"
     );
 }
@@ -342,6 +438,22 @@ fn a_change_that_introduces_an_undefined_term_is_a_warning__used_once() {
         .filter(|f| f["kind"] == "new_term_undefined")
         .collect();
     assert_eq!(all.len(), 1, "only chainParent: {all:#?}");
+}
+
+#[test]
+fn a_change_that_introduces_an_undefined_term_is_a_warning__new_span_is_an_admitted_synonym() {
+    let repo = glossary_repo();
+    repo.delta(
+        "epoch-retire",
+        "sharing-grants",
+        "## MODIFIED Requirements\n\n### Requirement: A grant names its chain head\n\nA grant MUST name the `steward` that issued it and the chain head.\n\n#### Scenario: Steward issues\n\n- **WHEN** the `steward` issues a grant\n- **THEN** the grant names the chain head\n",
+    );
+    let doc = review_json(&repo, "epoch-retire");
+    let fs = findings_of(&doc, "A grant names its chain head");
+    assert!(
+        fs.iter().all(|f| f["term"] != "steward"),
+        "the glossary knows it: {fs:#?}"
+    );
 }
 
 #[test]
@@ -447,7 +559,10 @@ fn definitions_findings_reach_plain_output_and_json__agent_reads_the_glossary() 
     let defs = doc["definitions"].as_array().unwrap();
     for d in defs {
         assert!(
-            d["term"].is_string() && d["meaning"].is_string() && d["deprecated"].is_array(),
+            d["term"].is_string()
+                && d["meaning"].is_string()
+                && d["admitted"].is_array()
+                && d["deprecated"].is_array(),
             "{d}"
         );
     }
@@ -469,7 +584,7 @@ fn definitions_findings_reach_plain_output_and_json__agent_reads_the_glossary() 
     ));
     assert!(only.contains("new term without definition"), "{only}");
     assert!(only.contains("summary: 0 errors, 2 warnings"), "{only}");
-    assert!(only.ends_with("glossary: 3 terms\n"), "{only}");
+    assert!(only.ends_with("glossary: 4 terms\n"), "{only}");
 }
 
 /// Backticked `spec:` citations were extracted as terms and reported as

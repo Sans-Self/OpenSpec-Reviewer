@@ -93,8 +93,8 @@ pub fn deprecated_in_canon(glossary: &Glossary, canon: &Canon) -> Vec<CanonHit> 
     out
 }
 
-/// Terms that appear in no canon requirement outside the glossary and in no
-/// delta of any open change.
+/// Terms whose name and admitted synonyms appear in no canon requirement
+/// outside the glossary and in no delta of any open change.
 pub fn unused_terms<'a>(
     glossary: &'a Glossary,
     canon: &Canon,
@@ -104,13 +104,12 @@ pub fn unused_terms<'a>(
         .terms
         .iter()
         .filter(|t| {
-            let m = Matcher::new(&t.name);
-            let in_canon = outside(canon, glossary).any(|(_, r)| m.is_match(&requirement_text(r)));
+            let in_canon = outside(canon, glossary).any(|(_, r)| t.used_in(&requirement_text(r)));
             let in_deltas = open_deltas
                 .iter()
                 .filter(|d| d.capability != glossary.capability)
                 .flat_map(|d| d.entries.iter())
-                .any(|e| m.is_match(&requirement_text(&e.requirement)));
+                .any(|e| t.used_in(&requirement_text(&e.requirement)));
             !in_canon && !in_deltas
         })
         .collect()

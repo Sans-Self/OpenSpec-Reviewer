@@ -26,12 +26,25 @@ The membership role that may add and remove members and author keyring
 supersedes. The other roles are editor and viewer; there is no owner
 role.
 
+- **Admitted:** steward
 - **Deprecated:** admin, owner
 
 #### Scenario: In a sentence
 
 - **WHEN** a manager removes a member
 - **THEN** the keyring head changes
+
+### Requirement: ledger
+
+The append-only record of every keyring supersede, read to reconstruct
+who held a wrap at any rotation.
+
+- **Admitted:** log
+
+#### Scenario: In a sentence
+
+- **WHEN** a supersede lands
+- **THEN** the ledger gains an entry
 
 ### Requirement: loket
 

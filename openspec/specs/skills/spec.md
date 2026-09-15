@@ -169,8 +169,11 @@ name the skill that does for each kind of edit.
 without definition" note with its uses, read the requirements listed,
 separate vocabulary from field names and paths, and for each term it
 keeps draft a `### Requirement: <term>` with a meaning distilled from
-the uses, a `- **Deprecated:**` line when the uses show a near-synonym,
-and one usage scenario lifted from a real requirement. The draft MUST
+the uses, an `- **Admitted:**` line when the uses show a second word for
+the same concept the project is content to keep, a `- **Deprecated:**`
+line when the uses show a word the project should stop saying, and one
+usage scenario lifted from a real requirement. The skill MUST tell the
+agent to put a word on one line or the other, never both. The draft MUST
 go under `## ADDED Requirements` in
 `openspec/changes/<name>/specs/definitions/spec.md` of a new change the
 agent names, and the skill MUST end by running
@@ -184,6 +187,14 @@ agent names, and the skill MUST end by running
 - **THEN** it drafts one term `ledger`
 - **AND** it leaves `createdAt` and `at.example.record` undefined
 - **AND** the draft is under `openspec/changes/`
+
+#### Scenario: Uses show a second acceptable word
+
+- **GIVEN** a lint note for `ledger`
+- **AND** the requirements listed say `ledger` and `log` for one concept
+- **AND** the project uses both
+- **WHEN** the agent follows the skill
+- **THEN** the drafted term has an `- **Admitted:**` line naming `log`
 
 ### Requirement: The cite skill adds citations to uncited requirements
 

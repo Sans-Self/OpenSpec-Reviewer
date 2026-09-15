@@ -1,26 +1,71 @@
-//! The `- **Deprecated:**` line and the whole-word matcher.
+//! The acceptability marker lines and the whole-word matcher.
 
 use crate::citations::Grammar;
 use regex::Regex;
 
-const DEPRECATED: &str = "- **Deprecated:**";
+/// The ISO 704 acceptability ratings a term may spell out. The preferred
+/// term is the requirement name, so it needs no line of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Marker {
+    Admitted,
+    Deprecated,
+}
 
-/// The body without the Deprecated line, and the comma-separated words the
-/// line listed.
-pub fn parse_deprecated(body: &str) -> (String, Vec<String>) {
-    let mut meaning = Vec::new();
-    let mut deprecated = Vec::new();
+/// Only these bold-prefixed lines are lifted out of the meaning. An
+/// author's own `- **Foo:**` bullet is prose and stays put.
+const MARKERS: [(Marker, &str); 2] = [
+    (Marker::Admitted, "- **Admitted:**"),
+    (Marker::Deprecated, "- **Deprecated:**"),
+];
+
+/// A term's body split into prose and the words each marker line listed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Markers {
+    pub meaning: String,
+    pub admitted: Vec<String>,
+    pub deprecated: Vec<String>,
+}
+
+fn listed(rest: &str) -> impl Iterator<Item = String> + '_ {
+    rest.split(',')
+        .map(|s| s.trim().trim_matches('`').trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// The body without its marker lines, and the words each one listed.
+/// Removing a marker line takes the blank line that followed it with it,
+/// so two markers in a row do not leave a gap in the prose.
+pub fn parse_markers(body: &str) -> Markers {
+    let mut out = Markers::default();
+    let mut meaning: Vec<&str> = Vec::new();
+    let mut removed = false;
     for line in body.lines() {
-        match line.trim_start().strip_prefix(DEPRECATED) {
-            Some(rest) => deprecated.extend(
-                rest.split(',')
-                    .map(|s| s.trim().trim_matches('`').trim().to_string())
-                    .filter(|s| !s.is_empty()),
-            ),
-            None => meaning.push(line),
+        let trimmed = line.trim_start();
+        match MARKERS
+            .iter()
+            .find_map(|(m, p)| trimmed.strip_prefix(p).map(|rest| (*m, rest)))
+        {
+            Some((Marker::Admitted, rest)) => {
+                out.admitted.extend(listed(rest));
+                removed = true;
+            }
+            Some((Marker::Deprecated, rest)) => {
+                out.deprecated.extend(listed(rest));
+                removed = true;
+            }
+            None => {
+                let blank = line.trim().is_empty();
+                let after_blank = meaning.last().is_none_or(|l| l.trim().is_empty());
+                if removed && blank && after_blank {
+                    continue;
+                }
+                meaning.push(line);
+                removed = false;
+            }
         }
     }
-    (meaning.join("\n").trim().to_string(), deprecated)
+    out.meaning = meaning.join("\n").trim().to_string();
+    out
 }
 
 /// Whole-word, case-insensitive, plural-tolerant. Runs of whitespace in the

@@ -8,7 +8,7 @@ pub use checks::{
     deprecated_in_canon, deprecated_in_pairings, new_undefined, recurring_undefined, term_in_use,
     unused_terms, CanonHit, Recurring,
 };
-pub use synonyms::{parse_deprecated, Matcher};
+pub use synonyms::{parse_markers, Markers, Matcher};
 
 use crate::model::{Canon, DeltaKind, DeltaSpec, Requirement, Scenario};
 use serde::Serialize;
@@ -17,12 +17,14 @@ pub const DEFAULT_CAPABILITY: &str = "definitions";
 pub const DEFAULT_MIN_RECURRENCE: usize = 3;
 
 /// A glossary entry. The name is the term, the body its meaning, the
-/// scenarios usage examples; `- **Deprecated:**` lists the words not to use.
+/// scenarios usage examples; `- **Admitted:**` lists the other words that
+/// mean it and `- **Deprecated:**` the words not to use for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Term {
     #[serde(rename = "term")]
     pub name: String,
     pub meaning: String,
+    pub admitted: Vec<String>,
     pub deprecated: Vec<String>,
     #[serde(skip)]
     pub examples: Vec<Scenario>,
@@ -30,13 +32,33 @@ pub struct Term {
 
 impl Term {
     pub fn from_requirement(req: &Requirement) -> Term {
-        let (meaning, deprecated) = parse_deprecated(&req.body);
+        let m = parse_markers(&req.body);
         Term {
             name: req.name.clone(),
-            meaning,
-            deprecated,
+            meaning: m.meaning,
+            admitted: m.admitted,
+            deprecated: m.deprecated,
             examples: req.scenarios.clone(),
         }
+    }
+
+    /// The words that are acceptable for this term: its name first, then
+    /// its admitted synonyms.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.name.as_str()).chain(self.admitted.iter().map(String::as_str))
+    }
+
+    /// Whether any acceptable word for this term appears in `text`.
+    pub fn used_in(&self, text: &str) -> bool {
+        self.names().any(|n| Matcher::new(n).is_match(text))
+    }
+
+    /// The earliest offset at which any acceptable word for this term
+    /// appears in `text`.
+    pub fn first_in(&self, text: &str) -> Option<usize> {
+        self.names()
+            .filter_map(|n| Matcher::new(n).first(text))
+            .min()
     }
 }
 
@@ -92,20 +114,23 @@ impl Glossary {
             .find(|t| t.name.eq_ignore_ascii_case(name))
     }
 
-    /// Terms and deprecated synonyms alike: every word the glossary knows.
+    /// Terms, admitted synonyms and deprecated synonyms alike: every word
+    /// the glossary accounts for.
     pub fn knows(&self, word: &str) -> bool {
         self.terms.iter().any(|t| {
-            t.name.eq_ignore_ascii_case(word)
-                || t.deprecated.iter().any(|d| d.eq_ignore_ascii_case(word))
+            t.names()
+                .chain(t.deprecated.iter().map(String::as_str))
+                .any(|n| n.eq_ignore_ascii_case(word))
         })
     }
 
-    /// Terms present in `text`, ordered by first appearance.
+    /// Terms present in `text`, ordered by first appearance. A term appears
+    /// where its name or any admitted synonym does, whichever comes first.
     pub fn terms_in<'a>(&'a self, text: &str) -> Vec<&'a Term> {
         let mut found: Vec<(usize, &Term)> = self
             .terms
             .iter()
-            .filter_map(|t| Matcher::new(&t.name).first(text).map(|at| (at, t)))
+            .filter_map(|t| t.first_in(text).map(|at| (at, t)))
             .collect();
         found.sort_by_key(|(at, _)| *at);
         found.into_iter().map(|(_, t)| t).collect()
