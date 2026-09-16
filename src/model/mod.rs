@@ -2,9 +2,11 @@
 
 mod change;
 mod parse;
+pub mod register;
 
 pub use change::{load_change, ChangeError};
 pub use parse::{parse_canon_spec, parse_delta_spec, ParseError};
+pub use register::{Entry, Ignores, Register, Scope, TermIgnore};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

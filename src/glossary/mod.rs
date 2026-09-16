@@ -5,8 +5,8 @@ pub mod checks;
 pub mod synonyms;
 
 pub use checks::{
-    deprecated_in_canon, deprecated_in_pairings, new_undefined, recurring_undefined, term_in_use,
-    unbound_terms, unused_terms, CanonHit, Recurring,
+    deprecated_in_canon, deprecated_in_pairings, new_undefined, recurring_undefined, span_sites,
+    term_in_use, unbound_terms, unused_terms, CanonHit, Recurring,
 };
 pub use synonyms::{parse_markers, Markers, Matcher};
 

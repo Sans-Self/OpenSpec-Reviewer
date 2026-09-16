@@ -3,7 +3,7 @@
 
 use super::{Glossary, Matcher};
 use crate::drift::terms::quoted_spans;
-use crate::model::{Canon, DeltaKind, Requirement};
+use crate::model::{Canon, DeltaKind, DeltaSpec, Ignores, Requirement};
 use crate::review::pair::requirement_text;
 use crate::review::{Finding, FindingKind, Location, Pairing};
 use std::collections::{BTreeMap, BTreeSet};
@@ -137,6 +137,7 @@ pub fn recurring_undefined(
     glossary: &Glossary,
     canon: &Canon,
     min_recurrence: usize,
+    ignores: &Ignores,
 ) -> Vec<Recurring> {
     let mut uses: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for (cap, req) in outside(canon, glossary) {
@@ -148,6 +149,13 @@ pub fn recurring_undefined(
     }
     uses.into_iter()
         .filter(|(term, _)| !glossary.knows(term))
+        .map(|(term, where_)| {
+            let kept = where_
+                .into_iter()
+                .filter(|(c, r)| !ignores.hides(&term, c, r))
+                .collect::<Vec<_>>();
+            (term, kept)
+        })
         .filter(|(_, where_)| {
             let caps: BTreeSet<&str> = where_.iter().map(|(c, _)| c.as_str()).collect();
             where_.len() >= min_recurrence && caps.len() >= 2
@@ -159,10 +167,50 @@ pub fn recurring_undefined(
         .collect()
 }
 
+/// Every requirement a quoted span appears in, across canon outside the
+/// glossary and the deltas of every open change. An ignore entry is live
+/// where this says its term still occurs, which makes the verdict a
+/// property of the repository rather than of the subcommand that ran.
+pub fn span_sites(
+    glossary: &Glossary,
+    canon: &Canon,
+    open_deltas: &[DeltaSpec],
+) -> BTreeMap<String, Vec<(String, String)>> {
+    let mut sites: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    let canon_texts = outside(canon, glossary)
+        .map(|(cap, req)| (cap.to_string(), req.name.clone(), requirement_text(req)));
+    let delta_texts = open_deltas
+        .iter()
+        .filter(|d| d.capability != glossary.capability)
+        .flat_map(|d| {
+            d.entries.iter().map(move |e| {
+                (
+                    d.capability.clone(),
+                    e.requirement.name.clone(),
+                    requirement_text(&e.requirement),
+                )
+            })
+        });
+    for (cap, name, text) in canon_texts.chain(delta_texts) {
+        for span in quoted_spans(&text) {
+            let at = sites.entry(span).or_default();
+            let site = (cap.clone(), name.clone());
+            if !at.contains(&site) {
+                at.push(site);
+            }
+        }
+    }
+    sites
+}
+
 /// Spans on any after side and on no before side of the change, used at
 /// least twice, that the glossary does not know: a warning on the first
 /// pairing that introduces each.
-pub fn new_undefined(glossary: &Glossary, pairings: &[&Pairing]) -> Vec<Finding> {
+pub fn new_undefined(
+    glossary: &Glossary,
+    pairings: &[&Pairing],
+    ignores: &Ignores,
+) -> Vec<Finding> {
     let before: BTreeSet<String> = pairings
         .iter()
         .filter_map(|p| p.before.as_ref())
@@ -178,6 +226,9 @@ pub fn new_undefined(glossary: &Glossary, pairings: &[&Pairing]) -> Vec<Finding>
         let text = requirement_text(after);
         for span in quoted_spans(&text) {
             if before.contains(&span) || glossary.knows(&span) {
+                continue;
+            }
+            if ignores.hides(&span, &p.capability, &p.name) {
                 continue;
             }
             *count.entry(span.clone()).or_default() += Matcher::new(&span).count(&text).max(1);

@@ -752,3 +752,103 @@ fn a_term_opens_with_a_binding_line__this_repositorys_own_terms() {
         assert!(term.binding.is_bound(), "`{}` is unbound", term.name);
     }
 }
+
+/// Three capabilities that each use `custodian` once, and a configuration
+/// with the given `[definitions]` body.
+fn custodian_repo(definitions: &str) -> Repo {
+    let repo = glossary_repo();
+    for cap in ["a", "b", "c"] {
+        repo.canon(cap, &format!("# {cap}\n\n## Requirements\n\n### Requirement: R {cap}\n\nThe `custodian` decides.\n\n#### Scenario: S\n\n- **WHEN** x\n- **THEN** y\n"));
+    }
+    repo.write(
+        "openspec/reviewer.toml",
+        &format!("[lint]\n\n[definitions]\n{definitions}"),
+    );
+    repo
+}
+
+#[test]
+fn a_recurring_undefined_term_is_a_note__recurring_ignored_term() {
+    let loud = custodian_repo("min_recurrence = 3\n");
+    assert!(
+        stdout(&run_in(loud.root(), &["lint"])).contains("definition: `custodian`"),
+        "without the entry it is a note"
+    );
+    let quiet = custodian_repo(
+        "min_recurrence = 3\n\n[[definitions.ignore]]\nterm = \"custodian\"\nreason = \"example vocabulary in the scenarios\"\n",
+    );
+    let text = stdout(&run_in(quiet.root(), &["lint"]));
+    assert!(!text.contains("definition: `custodian`"), "{text}");
+}
+
+#[test]
+fn a_recurring_undefined_term_is_a_note__ignored_in_one_capability_of_three() {
+    let repo = custodian_repo(
+        "min_recurrence = 3\n\n[[definitions.ignore]]\nterm = \"custodian\"\nin = [\"b\"]\nreason = \"example vocabulary in the scenarios\"\n",
+    );
+    let text = stdout(&run_in(repo.root(), &["lint"]));
+    assert!(
+        !text.contains("definition: `custodian`"),
+        "two uses are left, below the threshold: {text}"
+    );
+}
+
+/// A change that introduces `custodian` in one requirement of each of two
+/// capabilities, with the given `[definitions]` body configured.
+fn introducing_repo(definitions: &str) -> Repo {
+    let repo = glossary_repo();
+    repo.delta(
+        "epoch-retire",
+        "sharing-grants",
+        "## MODIFIED Requirements\n\n### Requirement: A grant names its chain head\n\nA grant MUST record the `chainHead` and the `custodian` that issued it.\n\n#### Scenario: Head recorded\n\n- **WHEN** a manager issues a grant\n- **THEN** the grant names the `chainHead`\n",
+    );
+    repo.delta(
+        "epoch-retire",
+        "keyring-tombstones",
+        "## MODIFIED Requirements\n\n### Requirement: Admin API mints invites\n\nThe provisioning endpoint MUST mint invite codes only for a `custodian`.\n\n#### Scenario: Manager mints\n\n- **WHEN** a manager calls the endpoint\n- **THEN** an invite code is returned\n",
+    );
+    repo.write(
+        "openspec/reviewer.toml",
+        &format!("[lint]\n\n[definitions]\n{definitions}"),
+    );
+    repo
+}
+
+fn new_terms(doc: &serde_json::Value) -> Vec<String> {
+    doc["changes"][0]["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|c| c["pairings"].as_array().unwrap())
+        .flat_map(|p| p["findings"].as_array().unwrap())
+        .filter(|f| f["kind"] == "new_term_undefined")
+        .map(|f| f["term"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_change_that_introduces_an_undefined_term_is_a_warning__new_span_is_ignored() {
+    let loud = introducing_repo("capability = \"definitions\"\n");
+    assert!(
+        new_terms(&review_json(&loud, "epoch-retire")).contains(&"custodian".to_string()),
+        "without the entry it is a warning"
+    );
+    let quiet = introducing_repo(
+        "capability = \"definitions\"\n\n[[definitions.ignore]]\nterm = \"custodian\"\nreason = \"example vocabulary in the scenarios\"\n",
+    );
+    assert!(
+        !new_terms(&review_json(&quiet, "epoch-retire")).contains(&"custodian".to_string()),
+        "the entry silences it"
+    );
+}
+
+#[test]
+fn a_change_that_introduces_an_undefined_term_is_a_warning__ignored_in_one_pairing_of_two() {
+    let repo = introducing_repo(
+        "capability = \"definitions\"\n\n[[definitions.ignore]]\nterm = \"custodian\"\nin = [\"sharing-grants § A grant names its chain head\"]\nreason = \"example vocabulary in the scenarios\"\n",
+    );
+    assert!(
+        !new_terms(&review_json(&repo, "epoch-retire")).contains(&"custodian".to_string()),
+        "one use is left, and once is not enough"
+    );
+}

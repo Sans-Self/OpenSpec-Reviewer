@@ -157,6 +157,39 @@ capability     = "definitions"   # which capability is the glossary; "" switches
 min_recurrence = 3               # how often an undefined span must recur
 ```
 
+## Ignoring a finding
+
+Two checks report things a project sometimes cannot act on: a word
+invented as an example inside a scenario will never have a definition,
+and a requirement about an output format is asserted by tests that
+cannot name it. Both can be dismissed in writing, with the reason next
+to the entry.
+
+```toml
+[[definitions.ignore]]
+term   = "mountType"
+in     = ["citations", "glossary § A term lists the words that are acceptable for it"]
+reason = "a configuration key quoted in prose, not a concept"
+
+[[lint.ignore_uncited]]
+requirement = "citations § Coverage lists citing tests per requirement"
+reason      = "asserted by the ledger snapshot, which cannot cite itself"
+```
+
+Every value is an exact string; nothing is read as a pattern. `in` is
+optional and always an array, each element a capability or a
+`<capability> § <requirement name>`, and without it the term is ignored
+everywhere. An entry with no `reason` is a configuration error.
+
+An ignored requirement still counts in the coverage total, which closes
+with `coverage: <cited>/<total> (<n> ignored)`; a figure that improves
+when somebody edits a configuration is a figure that lies. When an entry
+stops matching anything — the term got defined, the requirement was
+removed, one scope of several went quiet — the tool warns and asks for
+it back out. The verdict comes from the register, every requirement
+canon and the open changes assert, so `lint` and a review say the same
+thing about the same entry.
+
 ## Skills
 
 `openspec-reviewer skills install` writes five skills an agent loads to

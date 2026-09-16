@@ -2,10 +2,11 @@
 
 use crate::citations::radius::blast_radius;
 use crate::citations::scan::{reason, scan, OpenChange, SpecFile};
-use crate::citations::{read_config, Config, ConfigError, Grammar, Resolution};
+use crate::citations::structure::ignore_warnings;
+use crate::citations::{read_config, Config, ConfigError, Grammar, LintFinding, Resolution};
 use crate::drift::drift_findings;
 use crate::glossary::{self, Glossary};
-use crate::model::{load_change, Change, ChangeError};
+use crate::model::{load_change, Change, ChangeError, DeltaSpec, Register};
 use crate::review::pair::requirement_text;
 use crate::review::{
     collect_history, pair_change, CanonEdit, ChangeReview, Finding, FindingKind, Pairing, Review,
@@ -65,6 +66,28 @@ pub fn build_review(root: &Path, snapshot: &Snapshot) -> Result<Review, BuildErr
         None => None,
     };
 
+    // Every requirement the repository asserts, built once: the change
+    // under review, the other open changes and canon.
+    let open_deltas: Vec<DeltaSpec> = others
+        .iter()
+        .flat_map(|(_, d)| d.iter().cloned())
+        .chain(changes.iter().flat_map(|c| c.deltas.iter().cloned()))
+        .collect();
+    let register = Register::build(&canon, &open_deltas);
+    let notices: Vec<LintFinding> = config
+        .as_ref()
+        .map(|c| ignore_warnings(c, &register, &canon, &open_deltas))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| {
+            LintFinding::new(
+                crate::review::Severity::Warning,
+                crate::citations::config::CONFIG_PATH,
+                d.message(),
+            )
+        })
+        .collect();
+
     let reviews: Vec<ChangeReview> = changes
         .iter()
         .map(|change| {
@@ -89,7 +112,9 @@ pub fn build_review(root: &Path, snapshot: &Snapshot) -> Result<Review, BuildErr
         .collect();
 
     let canon_edits = snapshot.canon_files().map(CanonEdit::from_file).collect();
-    Ok(Review::new(snapshot.origin.clone(), reviews, canon_edits).with_glossary(glossary))
+    Ok(Review::new(snapshot.origin.clone(), reviews, canon_edits)
+        .with_glossary(glossary)
+        .with_notices(notices))
 }
 
 /// The lint's view of the change under review: its deltas as the snapshot
@@ -195,7 +220,11 @@ fn join_glossary(
     let pairings: Vec<Pairing> = review.pairings().cloned().collect();
     let refs: Vec<&Pairing> = pairings.iter().collect();
     let mut extra: Vec<Finding> = glossary::deprecated_in_pairings(&glossary, &refs);
-    extra.extend(glossary::new_undefined(&glossary, &refs));
+    extra.extend(glossary::new_undefined(
+        &glossary,
+        &refs,
+        &definitions.ignores(),
+    ));
     for p in &pairings {
         extra.extend(glossary::term_in_use(&glossary, canon, p));
     }

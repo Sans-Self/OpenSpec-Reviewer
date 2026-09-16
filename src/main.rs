@@ -185,7 +185,8 @@ fn run_lint(
     let config = require_config(root)?;
     let workspace = Workspace::load(root, &config.lint)?;
     let report = lint(&workspace.input(), &config)?;
-    let ledger = coverage.then(|| ledger(&report.index));
+    let ignored = config.ignored_requirements();
+    let ledger = coverage.then(|| ledger(&report.index, &report.register, &ignored));
     match format {
         Some(Format::Json) => print!("{}", render::render_json(&report, ledger.as_ref())),
         _ => {

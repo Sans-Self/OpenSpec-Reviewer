@@ -1,0 +1,31 @@
+[lint]
+source_roots    = ["src"]
+source_globs    = ["**/*.rs"]
+skip_dirs       = []
+path_prefixes   = ["src"]
+path_extensions = ["rs", "md"]
+test_pattern    = "bug__\\w+"
+
+[[lint.ignore_uncited]]
+requirement = "gamma § The ledger prints one line per entry"
+reason      = "asserted by the ledger snapshot, which cannot cite itself"
+
+[term_drift]
+max_common = 5
+
+[definitions]
+capability     = "definitions"
+min_recurrence = 3
+
+[[definitions.ignore]]
+term   = "mountType"
+reason = "a configuration key quoted in prose, not a concept"
+
+[[definitions.ignore]]
+term   = "custodian"
+in     = ["alpha", "beta"]
+reason = "example vocabulary invented inside the scenarios"
+
+[[definitions.ignore]]
+term   = "wharfMaster"
+reason = "left over from the harbour prototype"

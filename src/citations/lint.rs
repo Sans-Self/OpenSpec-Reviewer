@@ -4,10 +4,10 @@ use super::config::Config;
 use super::evidence::{check_hashes, check_paths, check_tests, Probe};
 use super::radius::blast_radius;
 use super::scan::{reason, scan, OpenChange, SourceFile, SpecFile};
-use super::structure::{check_changes, ChangeDir};
+use super::structure::{check_changes, ignore_warnings, ChangeDir};
 use super::{CitationIndex, Grammar};
 use crate::glossary::{self, Glossary};
-use crate::model::Canon;
+use crate::model::{Canon, DeltaSpec, Register};
 use crate::review::{Finding, Severity, Summary};
 use regex::Regex;
 use serde::Serialize;
@@ -26,7 +26,11 @@ pub struct LintFinding {
 }
 
 impl LintFinding {
-    fn new(severity: Severity, file: impl Into<String>, message: impl Into<String>) -> LintFinding {
+    pub fn new(
+        severity: Severity,
+        file: impl Into<String>,
+        message: impl Into<String>,
+    ) -> LintFinding {
         LintFinding {
             severity,
             file: file.into(),
@@ -82,6 +86,9 @@ pub struct LintReport {
     pub glossary: String,
     #[serde(skip)]
     pub index: CitationIndex,
+    /// Every requirement the repository asserts, for the ledger.
+    #[serde(skip)]
+    pub register: Register,
 }
 
 impl LintReport {
@@ -216,6 +223,20 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         );
     }
 
+    let open_deltas: Vec<DeltaSpec> = input
+        .changes
+        .iter()
+        .flat_map(|c| c.deltas.iter().cloned())
+        .collect();
+    let register = Register::build(input.canon, &open_deltas);
+    for d in ignore_warnings(config, &register, input.canon, &open_deltas) {
+        findings.push(LintFinding::new(
+            Severity::Warning,
+            super::config::CONFIG_PATH,
+            d.message(),
+        ));
+    }
+
     let glossary = Glossary::build(input.canon, &[], &config.definitions.capability);
     let glossary_line = match glossary.terms.len() {
         0 => "no glossary".to_string(),
@@ -241,11 +262,6 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
                 ),
             ));
         }
-        let open_deltas: Vec<crate::model::DeltaSpec> = input
-            .changes
-            .iter()
-            .flat_map(|c| c.deltas.iter().cloned())
-            .collect();
         for term in glossary::unused_terms(&glossary, input.canon, &open_deltas) {
             findings.push(LintFinding::new(
                 Severity::Note,
@@ -269,9 +285,12 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
                 },
             ));
         }
-        for r in
-            glossary::recurring_undefined(&glossary, input.canon, config.definitions.min_recurrence)
-        {
+        for r in glossary::recurring_undefined(
+            &glossary,
+            input.canon,
+            config.definitions.min_recurrence,
+            &config.definitions.ignores(),
+        ) {
             let mut f = LintFinding::new(
                 Severity::Note,
                 spec_path(&glossary.capability),
@@ -301,6 +320,7 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         unconfigured,
         glossary: glossary_line,
         index: scanned.index,
+        register,
     })
 }
 
