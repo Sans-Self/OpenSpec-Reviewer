@@ -20,10 +20,15 @@ jobs:
           - os: macos-14
             system: aarch64-darwin
     runs-on: ${{ matrix.os }}
+    env:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
+      # Without a token the cache may not exist yet, and `cachix use` refuses
+      # a cache it cannot see; the build still runs, uncached.
       - uses: cachix/cachix-action@v15
+        if: env.CACHIX_AUTH_TOKEN != ''
         with:
           name: sans-self
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
