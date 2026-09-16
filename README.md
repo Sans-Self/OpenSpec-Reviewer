@@ -194,16 +194,19 @@ thing about the same entry.
 
 ## Skills
 
-`openspec-reviewer skills install` writes five skills an agent loads to
+`openspec-reviewer skills install` writes six skills an agent loads to
 work with the reviewer. `opsx-reviewer-workflow` is for the agent: it
 loads on its own in a repository with `openspec/` and the binary, and
 says when to run the review and the lint, what every finding kind means,
 how to write a citation, and which skill to reach for next. The other
-four are for you and the agent both, each with a `/opsx-reviewer:<name>`
+five are for you and the agent both, each with a `/opsx-reviewer:<name>`
 command:
 
 - `define` drafts glossary terms from the lint's recurring undefined
   terms, into a new change.
+- `discover` reads canon for the concepts written in plain prose that
+  recur across capabilities, which the span check cannot see, and hands
+  them to `define`.
 - `cite` adds `spec:` citations to the tests that already exercise
   uncited requirements.
 - `crossref` judges the siblings a change puts in question, quotes the

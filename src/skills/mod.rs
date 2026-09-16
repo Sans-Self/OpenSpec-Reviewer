@@ -1,4 +1,4 @@
-//! Skills an agent loads to work with the reviewer: five `SKILL.md`
+//! Skills an agent loads to work with the reviewer: six `SKILL.md`
 //! bodies shipped in the binary, rendered with frontmatter, and the plan
 //! for writing them into a repository. Reading and writing the files is
 //! `source::skills`; this module only decides what each file should say.
@@ -48,6 +48,12 @@ pub const SKILLS: &[Skill] = &[
         name: "define",
         description: "Turn openspec-reviewer's recurring undefined terms into a drafted definitions delta in a new change. Writes under openspec/changes/ on confirmation.",
         body: include_str!("define.md"),
+        command: true,
+    },
+    Skill {
+        name: "discover",
+        description: "Find the vocabulary a repository's specs rely on in plain prose, across capabilities, and hand the candidates to define. Writes nothing itself; define writes under openspec/changes/ on confirmation.",
+        body: include_str!("discover.md"),
         command: true,
     },
     Skill {

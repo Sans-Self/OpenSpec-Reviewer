@@ -4,7 +4,7 @@ description: How to work with openspec-reviewer in a repository that has an open
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
   generatedBy: openspec-reviewer 0.1.0
-  checksum: 9aac4f2bfced0f25
+  checksum: ecbd4ed41bda2b89
 ---
 Use this skill in any repository with an `openspec/` directory and an
 `openspec-reviewer` binary. It tells you when to run the reviewer, how to
@@ -100,7 +100,8 @@ field named after `not configured:` is a check switched off in
 `openspec/reviewer.toml`. Two messages have a skill of their own:
 `recurring term without definition` is what `define` reads, and the
 `--coverage` ledger of requirements with zero citing files is what
-`cite` reads.
+`cite` reads. A quiet lint over specs written in plain prose is what
+`discover` is for: the span check cannot see a term nobody backticked.
 
 ## Writing a citation
 
@@ -116,6 +117,7 @@ ignored.
 | finding | load |
 | --- | --- |
 | `recurring term without definition`, `new_term_undefined` | `opsx-reviewer-define` |
+| no definitions notes over specs that name concepts in plain prose | `opsx-reviewer-discover` |
 | uncited requirements in the coverage ledger | `opsx-reviewer-cite` |
 | `sibling_uses_removed`, `sibling_uses_old_name`, `term_in_use`, `modified_has_citers`, `removed_still_cited` | `opsx-reviewer-crossref` |
 | a change with several errors or warnings of mechanical kinds | `opsx-reviewer-triage` |

@@ -10,7 +10,7 @@ use openspec_reviewer::review::FindingKind;
 use openspec_reviewer::skills::{checksum, plain_citations, recorded_checksum, split, SKILLS};
 use std::path::Path;
 
-const TASK_SKILLS: [&str; 4] = ["define", "cite", "crossref", "triage"];
+const TASK_SKILLS: [&str; 5] = ["define", "discover", "cite", "crossref", "triage"];
 
 fn skills_in(repo: &Repo, args: &[&str]) -> std::process::Output {
     let mut all = vec!["skills"];
@@ -69,7 +69,7 @@ fn skills_install_into_the_repository__fresh_install() {
     assert!(!repo.root().join(".agents").exists());
     assert_eq!(
         stdout(&out).matches("wrote .claude/skills/").count(),
-        5,
+        6,
         "{}",
         stdout(&out)
     );
@@ -118,12 +118,12 @@ fn skills_install_into_the_repository__no_claude_directory() {
 fn skills_install_into_the_repository__list_reports_state() {
     let repo = claude_repo();
     let before = stdout(&skills_in(&repo, &["list"]));
-    assert_eq!(before.matches("not installed").count(), 9, "{before}");
+    assert_eq!(before.matches("not installed").count(), 11, "{before}");
     skills_in(&repo, &["install"]);
     let path = ".claude/skills/opsx-reviewer-cite/SKILL.md";
     repo.write(path, &(installed(&repo, "cite") + "edited\n"));
     let after = stdout(&skills_in(&repo, &["list"]));
-    assert_eq!(after.matches("up to date").count(), 8, "{after}");
+    assert_eq!(after.matches("up to date").count(), 10, "{after}");
     assert!(
         after
             .lines()
@@ -145,12 +145,12 @@ fn skills_install_into_the_repository__outdated_file_is_overwritten() {
     skills_in(&repo, &["install"]);
     assert_eq!(
         body_of(&installed(&repo, "cite")),
-        plain_citations(SKILLS[2].body)
+        plain_citations(openspec_reviewer::skills::skill("cite").unwrap().body)
     );
 }
 
 #[test]
-fn user_callable_skills_get_a_command_alias__four_commands_not_five() {
+fn user_callable_skills_get_a_command_alias__five_commands_not_six() {
     let repo = claude_repo();
     skills_in(&repo, &["install"]);
     let dir = repo.root().join(".claude/commands/opsx-reviewer");
@@ -159,7 +159,16 @@ fn user_callable_skills_get_a_command_alias__four_commands_not_five() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert_eq!(names, ["cite.md", "crossref.md", "define.md", "triage.md"]);
+    assert_eq!(
+        names,
+        [
+            "cite.md",
+            "crossref.md",
+            "define.md",
+            "discover.md",
+            "triage.md"
+        ]
+    );
 }
 
 #[test]
@@ -363,6 +372,38 @@ fn the_define_skill_drafts_glossary_terms__three_candidates_one_kept() {
     assert!(body.contains("A spec MUST use `<term>` to mean:"));
     assert!(body.contains("- **Deprecated:**"));
     assert!(body.contains("openspec-reviewer change <name>"));
+}
+
+#[test]
+fn the_discover_skill_finds_the_vocabulary_the_spans_miss__prose_term_in_three_capabilities() {
+    let body = openspec_reviewer::skills::skill("discover").unwrap().body;
+    assert!(body.contains("openspec-reviewer lint --format json"));
+    assert!(body.contains("recurring term without definition"));
+    assert!(body.contains("`### Requirement:` heading"));
+    assert!(body.contains("one to three"));
+    assert!(body.contains("two or more capabilities"));
+    assert!(body.contains("`capability § requirement`"));
+    assert!(body.contains("`define`"));
+    assert!(body.contains("openspec-reviewer change <name>"));
+}
+
+#[test]
+fn the_discover_skill_finds_the_vocabulary_the_spans_miss__phrase_in_one_capability_only() {
+    let body = openspec_reviewer::skills::skill("discover").unwrap().body;
+    assert!(
+        body.contains("recurrence inside one capability is\n   not a signal"),
+        "{body}"
+    );
+    assert!(body.contains("Drop the rest"));
+}
+
+#[test]
+fn the_discover_skill_finds_the_vocabulary_the_spans_miss__phrase_the_glossary_knows() {
+    let body = openspec_reviewer::skills::skill("discover").unwrap().body;
+    assert!(body.contains("openspec/specs/definitions/spec.md"));
+    assert!(body.contains("- **Admitted:**"));
+    assert!(body.contains("- **Deprecated:**"));
+    assert!(body.contains("Ask how many"));
 }
 
 #[test]
