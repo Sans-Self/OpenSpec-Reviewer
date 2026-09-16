@@ -37,8 +37,9 @@ Interactive when stdout is a terminal. Plain text when piped, or with
 for the notes you wrote; `--findings-only` for CI. Exit status is `2` on
 errors, `1` on warnings, `0` otherwise.
 
-Approvals and notes live under `$XDG_STATE_HOME/openspec-reviewer/`, per
-repository and change. `--no-state` ignores them.
+Approvals, notes and agent hints live under
+`$XDG_STATE_HOME/openspec-reviewer/`, per repository and change, with the
+prompt files an agent was handed. `--no-state` ignores them.
 
 ## What a review looks like
 
@@ -219,6 +220,48 @@ install and named; `skills list` shows each file's state. To rewrite a
 skill's instructions for one project, put the body at
 `openspec/reviewer/skills/<name>.md`; the shipped frontmatter stays.
 Every skill writes into a change, never into `openspec/specs/`.
+
+## Asking an agent
+
+The mechanical checks stop where judgment starts: they can see that a
+scenario has a WHEN and a THEN, not that the WHEN hides two events. Name
+an agent CLI you already have and the reviewer will hand it a pairing.
+
+```toml
+[assist]
+agent = "claude"        # claude, codex, opencode or custom
+# agent           = "custom"
+# handoff_command = "aichat -f {prompt}"
+# review_command  = "aichat -f {prompt} --no-stream"
+```
+
+`i` on a requirement writes a prompt file, leaves the view and opens an
+interactive session on it; the view comes back with the same row selected
+when the session exits. On any other row the prompt holds the whole
+change. `A` runs the same prompt non-interactively and turns the JSON
+reply into hints: a fourth severity below `note`, marked `✦` on the row,
+listed under the findings, and ignored by the exit status. `x` dismisses
+the hint under the cursor in the detail pane, and it stays dismissed when
+a later run returns the same one. Hints are cached against the hash of
+the text they were made for, so a pairing you then edit shows none until
+you ask again.
+
+The prompt holds the pairing's kind, both texts, the findings already
+reported, the canon requirements its drift hits name, the glossary terms
+it uses, your note and its history. It opens with the project's own
+`rules.specs` from `openspec/config.yaml`, so the reviewing agent grades
+against the style the proposing agent was told to follow.
+
+```sh
+openspec-reviewer assist prompts                  # the templates, to edit
+openspec-reviewer change foo --format json --assist
+openspec-reviewer change foo --findings-only --assist --hints
+```
+
+`assist prompts` writes `pairing.md`, `change.md` and `hints.md` to
+`openspec/reviewer/prompts/`, leaving any file already there alone; a
+file of that name replaces the built-in from then on. Without `--assist`
+no run starts an agent, and no hint ever changes the exit status.
 
 ## Development
 

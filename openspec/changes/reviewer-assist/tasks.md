@@ -47,4 +47,4 @@
 - [x] 6.1 Fake-CLI fixtures: valid reply, malformed reply, non-zero
       exit.
 - [x] 6.2 Every requirement cited from at least one test title.
-- [ ] 6.3 README section on configuring an agent and exporting prompts.
+- [x] 6.3 README section on configuring an agent and exporting prompts.
