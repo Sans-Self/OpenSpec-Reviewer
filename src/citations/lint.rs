@@ -3,7 +3,7 @@
 use super::config::Config;
 use super::evidence::{check_hashes, check_paths, check_tests, Probe};
 use super::radius::blast_radius;
-use super::scan::{reason, scan, OpenChange, SourceFile, SpecFile};
+use super::scan::{reason_for, scan, OpenChange, SourceFile, SpecFile};
 use super::structure::{check_changes, ChangeDir};
 use super::{CitationIndex, Grammar};
 use crate::model::Canon;
@@ -195,11 +195,7 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         LintFinding::new(
             Severity::Error,
             display(&s.file),
-            format!(
-                "dangling citation `{}`: {}",
-                s.citation,
-                reason(&r, &s.citation)
-            ),
+            format!("dangling citation `{}`: {}", s.citation, reason_for(s, &r)),
         )
     }));
 

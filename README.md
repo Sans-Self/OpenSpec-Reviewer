@@ -94,9 +94,11 @@ the keys.
 
 ## Citations
 
-Specs cite evidence and tests cite specs. A test title or a `cite()` call
-carrying `spec:<capability> § <requirement name>` must name a requirement
-that exists in canon or that an open change adds. A canon spec that names
+Specs cite evidence and tests cite specs. A test title, a comment or a
+`cite()` call carrying `spec:<capability> § <requirement name>` must name
+a requirement that exists in canon or that an open change adds. Inside
+backticks a citation may wrap across lines, comment markers included, so
+a moduledoc can cite at 80 columns. A canon spec that names
 a path, a `bug__` regression test or a commit hash must name one that
 exists. `lint` checks both directions and, per open change, the blast
 radius: a REMOVED requirement something outside its capability still
