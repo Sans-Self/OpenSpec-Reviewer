@@ -1,7 +1,16 @@
-# openspec-reviewer
+<h1 align="center">openspec-reviewer</h1>
 
-Review an [OpenSpec](https://github.com/Fission-AI/OpenSpec) change as the
-semantic diff it is, not the file diff git shows.
+<p align="center">
+  Review an <a href="https://github.com/Fission-AI/OpenSpec">OpenSpec</a> change as the semantic diff it is,<br>
+  not the file diff git shows.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Sans-Self/OpenSpec-Reviewer/actions/workflows/nix.yml"><img alt="nix build" src="https://github.com/Sans-Self/OpenSpec-Reviewer/actions/workflows/nix.yml/badge.svg"></a>
+  <a href="https://github.com/Sans-Self/OpenSpec-Reviewer/tags"><img alt="release" src="https://img.shields.io/github/v/tag/Sans-Self/OpenSpec-Reviewer?label=release&sort=semver"></a>
+  <a href="https://sans-self.cachix.org"><img alt="cachix" src="https://img.shields.io/badge/cachix-sans--self-5c6bc0"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/licence-MIT-green"></a>
+</p>
 
 A delta spec restates every requirement it modifies. To git that is a new
 file full of added lines; to a reviewer the actual change is a few words
@@ -12,6 +21,15 @@ cannot see: a dropped scenario, a MODIFIED requirement that has no canon
 target, a second open change touching the same requirement. You approve
 items one by one, leave notes, and export them for the pull request.
 
+- [Installation](#installation)
+- [Usage](#usage)
+- [What a review looks like](#what-a-review-looks-like)
+- [Citations](#citations)
+- [Glossary](#glossary)
+- [Ignoring a finding](#ignoring-a-finding)
+- [Skills](#skills)
+- [Development](#development)
+
 ## Installation
 
 The repository is a nix flake with a package output, so nothing needs
@@ -20,6 +38,19 @@ cloning:
 ```sh
 nix run github:Sans-Self/OpenSpec-Reviewer/v0.1.0 -- lint
 nix profile install github:Sans-Self/OpenSpec-Reviewer/v0.1.0
+```
+
+Or pin it in your own flake and put it in the dev shell:
+
+```nix
+inputs.openspec-reviewer = {
+  url = "github:Sans-Self/OpenSpec-Reviewer/v0.1.0";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+
+devShells.default = pkgs.mkShell {
+  packages = [ openspec-reviewer.packages.${system}.default ];
+};
 ```
 
 CI builds every tag for `x86_64-linux` and `aarch64-darwin` and pushes
@@ -41,7 +72,7 @@ Run from the root of a repository that has an `openspec/` directory.
 Canon is always read from that working directory.
 
 ```sh
-openspec-reviewer change sweep-gate      # the change as it is on disk
+openspec-reviewer change sweep-gate            # the change as it is on disk
 openspec-reviewer diff pr.patch                # a unified diff, applied against this checkout
 gh pr diff 224 | openspec-reviewer diff        # same, from stdin
 openspec-reviewer git feature/foo --base main  # two refs, no patching
@@ -62,7 +93,6 @@ errors, `1` on warnings, `0` otherwise.
 
 Approvals and notes live under `$XDG_STATE_HOME/openspec-reviewer/`, per
 repository and change. `--no-state` ignores them.
-
 ## What a review looks like
 
 A delta that restates a requirement to change one sentence, add two
@@ -105,15 +135,17 @@ reviewer pairs it with canon and shows this:
 summary: 0 errors, 0 warnings, 0 notes
 ```
 
-Each requirement row carries its approval mark (`[ ]`, `[√]`, or `[~]`
-when the text changed since approval), the delta kind (`+` added, `~`
-modified, `-` removed, `>` renamed), then `!` for an error finding, `?`
-for a warning and `✎` for a note. Changed paragraphs mark removed words
-`[-like this-]` and added words `{+like this+}`; paragraphs and scenarios
-equal on both sides print once, unmarked. Findings, the note and a
-one-line history follow each requirement. In the interactive view the
-same rows sit in a list on the left with the diff on the right; `?` lists
-the keys.
+| mark | meaning |
+| --- | --- |
+| `[ ]` `[√]` `[~]` | not approved, approved, text changed since approval |
+| `+` `~` `-` `>` | requirement added, modified, removed, renamed |
+| `!` `?` `✎` | an error finding, a warning, a note |
+| `[-word-]` `{+word+}` | removed and added words inside a changed paragraph |
+
+Paragraphs and scenarios equal on both sides print once, unmarked.
+Findings, the note and a one-line history follow each requirement. In
+the interactive view the same rows sit in a list on the left with the
+diff on the right; `?` lists the keys.
 
 ## Citations
 
@@ -157,7 +189,6 @@ removes a backticked identifier, a quoted string or a phrase from a
 requirement and a canon requirement in another capability still uses it,
 the pairing gets a warning naming the sibling. A renamed requirement
 whose old name still appears in sibling prose gets the same.
-
 ## Glossary
 
 `openspec/specs/definitions/spec.md` is the project's glossary when it
@@ -181,7 +212,6 @@ spans that recur across capabilities without a definition. In the TUI,
 capability     = "definitions"   # which capability is the glossary; "" switches it off
 min_recurrence = 3               # how often an undefined span must recur
 ```
-
 ## Ignoring a finding
 
 Two checks report things a project sometimes cannot act on: a word
@@ -214,7 +244,6 @@ removed, one scope of several went quiet — the tool warns and asks for
 it back out. The verdict comes from the register, every requirement
 canon and the open changes assert, so `lint` and a review say the same
 thing about the same entry.
-
 ## Skills
 
 `openspec-reviewer skills install` writes six skills an agent loads to
@@ -247,7 +276,6 @@ install and named; `skills list` shows each file's state. To rewrite a
 skill's instructions for one project, put the body at
 `openspec/reviewer/skills/<name>.md`; the shipped frontmatter stays.
 Every skill writes into a change, never into `openspec/specs/`.
-
 ## Development
 
 ```sh
@@ -256,4 +284,5 @@ cargo test
 cargo run -- --help
 ```
 
-Specs live under `openspec/`. The tool reviews its own changes.
+Specs live under `openspec/`. The tool reviews its own changes, and
+`.github/workflows/nix.yml` builds every push on Linux and macOS.
