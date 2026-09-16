@@ -23,6 +23,10 @@ pub struct Pairing {
     pub after: Option<Requirement>,
     pub diff: RequirementDiff,
     pub findings: Vec<Finding>,
+    /// What an agent said about this pairing, cached in the state file.
+    /// Dismissed hints are kept so a re-run cannot bring them back.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hints: Vec<crate::assist::Hint>,
     pub history: Vec<HistoryEntry>,
     pub state: ItemState,
 }
@@ -49,6 +53,16 @@ impl Pairing {
 
     pub fn worst_severity(&self) -> Option<super::Severity> {
         self.findings.iter().map(|f| f.severity).max()
+    }
+
+    /// The hints the reviewer has not dismissed: what the view, the plain
+    /// text and the markers show.
+    pub fn visible_hints(&self) -> impl Iterator<Item = &crate::assist::Hint> {
+        self.hints.iter().filter(|h| !h.dismissed)
+    }
+
+    pub fn has_hint(&self) -> bool {
+        self.visible_hints().next().is_some()
     }
 }
 
@@ -217,6 +231,7 @@ fn pair_entry(
         after,
         diff,
         findings,
+        hints: Vec::new(),
         history: Vec::new(),
         state: ItemState::default(),
     }

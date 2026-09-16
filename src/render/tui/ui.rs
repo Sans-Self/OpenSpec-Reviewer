@@ -145,7 +145,7 @@ fn severity_style(s: Severity, palette: Palette) -> Style {
     match s {
         Severity::Error => palette.error(),
         Severity::Warning => palette.warning(),
-        Severity::Note => palette.muted(),
+        Severity::Note | Severity::Hint => palette.muted(),
     }
 }
 

@@ -215,7 +215,8 @@ fn exit_status_reflects_the_worst_finding() {
         Summary {
             errors: 0,
             warnings: 2,
-            notes: 0
+            notes: 0,
+            hints: 0
         }
         .exit_code(),
         1
@@ -224,7 +225,8 @@ fn exit_status_reflects_the_worst_finding() {
         Summary {
             errors: 1,
             warnings: 2,
-            notes: 0
+            notes: 0,
+            hints: 0
         }
         .exit_code(),
         2
@@ -233,7 +235,8 @@ fn exit_status_reflects_the_worst_finding() {
         Summary {
             errors: 0,
             warnings: 0,
-            notes: 3
+            notes: 3,
+            hints: 0
         }
         .exit_code(),
         0

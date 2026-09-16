@@ -25,7 +25,7 @@ pub fn render_text(report: &LintReport, coverage: Option<&Coverage>) -> LintOutp
     for f in &report.findings {
         match f.severity {
             Severity::Error => write_finding(&mut stderr, f),
-            Severity::Warning | Severity::Note => write_finding(&mut stdout, f),
+            Severity::Warning | Severity::Note | Severity::Hint => write_finding(&mut stdout, f),
         }
     }
     let _ = writeln!(stdout, "{}", report.summary_line());

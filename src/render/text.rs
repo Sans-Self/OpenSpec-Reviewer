@@ -47,7 +47,7 @@ fn severity_code(s: Severity) -> &'static str {
     match s {
         Severity::Error => ansi::RED,
         Severity::Warning => ansi::YELLOW,
-        Severity::Note => ansi::DIM,
+        Severity::Note | Severity::Hint => ansi::DIM,
     }
 }
 

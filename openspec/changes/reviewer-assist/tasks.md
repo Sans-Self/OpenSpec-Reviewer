@@ -2,10 +2,10 @@
 
 ## 1. Abstraction
 
-- [ ] 1.1 `Assistant` trait, `Hint`, `HintKind`, `AssistError`.
-- [ ] 1.2 `[assist]` config: `agent`, `handoff_command`,
+- [x] 1.1 `Assistant` trait, `Hint`, `HintKind`, `AssistError`.
+- [x] 1.2 `[assist]` config: `agent`, `handoff_command`,
       `review_command`; unconfigured and missing-binary messages.
-- [ ] 1.3 Adapters for `claude`, `codex`, `opencode` and `custom`, each
+- [x] 1.3 Adapters for `claude`, `codex`, `opencode` and `custom`, each
       pinned by an argv-recording fake-binary test.
 
 ## 2. Prompts

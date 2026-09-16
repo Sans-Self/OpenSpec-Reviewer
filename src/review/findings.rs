@@ -7,6 +7,9 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    /// An agent's reading, never a mechanical check. Below `Note` so it
+    /// sorts last and, by `exit_code`, counts for nothing.
+    Hint,
     Note,
     Warning,
     Error,
@@ -18,6 +21,7 @@ impl fmt::Display for Severity {
             Severity::Error => "error",
             Severity::Warning => "warning",
             Severity::Note => "note",
+            Severity::Hint => "hint",
         })
     }
 }
@@ -388,6 +392,12 @@ pub struct Summary {
     pub errors: usize,
     pub warnings: usize,
     pub notes: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub hints: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 impl Summary {
@@ -397,11 +407,13 @@ impl Summary {
                 Severity::Error => s.errors += 1,
                 Severity::Warning => s.warnings += 1,
                 Severity::Note => s.notes += 1,
+                Severity::Hint => s.hints += 1,
             }
             s
         })
     }
 
+    /// Hints are read, not counted: CI stays deterministic.
     pub fn exit_code(&self) -> i32 {
         if self.errors > 0 {
             2
@@ -413,7 +425,7 @@ impl Summary {
     }
 
     pub fn total(&self) -> usize {
-        self.errors + self.warnings + self.notes
+        self.errors + self.warnings + self.notes + self.hints
     }
 }
 
@@ -428,7 +440,16 @@ impl fmt::Display for Summary {
             if self.warnings == 1 { "" } else { "s" },
             self.notes,
             if self.notes == 1 { "" } else { "s" },
-        )
+        )?;
+        if self.hints > 0 {
+            write!(
+                f,
+                ", {} hint{}",
+                self.hints,
+                if self.hints == 1 { "" } else { "s" }
+            )?;
+        }
+        Ok(())
     }
 }
 

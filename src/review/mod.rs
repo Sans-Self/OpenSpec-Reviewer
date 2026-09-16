@@ -90,15 +90,16 @@ fn terms_only<S: serde::Serializer>(
 
 impl Review {
     pub fn new(origin: String, changes: Vec<ChangeReview>, canon_edits: Vec<CanonEdit>) -> Review {
-        let summary = Summary::of(changes.iter().flat_map(ChangeReview::findings));
-        Review {
+        let mut review = Review {
             origin,
             changes,
             canon_edits,
-            summary,
+            summary: Summary::default(),
             glossary: crate::glossary::Glossary::default(),
             notices: Vec::new(),
-        }
+        };
+        review.recount();
+        review
     }
 
     pub fn with_notices(mut self, notices: Vec<crate::citations::LintFinding>) -> Review {
@@ -128,8 +129,15 @@ impl Review {
                 Severity::Error => summary.errors += 1,
                 Severity::Warning => summary.warnings += 1,
                 Severity::Note => summary.notes += 1,
+                Severity::Hint => summary.hints += 1,
             }
         }
+        summary.hints += self
+            .changes
+            .iter()
+            .flat_map(ChangeReview::pairings)
+            .map(|p| p.visible_hints().count())
+            .sum::<usize>();
         self.summary = summary;
     }
 

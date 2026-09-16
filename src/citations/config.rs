@@ -126,6 +126,8 @@ pub struct Config {
     pub term_drift: TermDrift,
     #[serde(default)]
     pub definitions: Definitions,
+    /// Absent means assist is not configured; every assist key says so.
+    pub assist: Option<crate::assist::Assist>,
 }
 
 impl Config {
