@@ -1,0 +1,35 @@
+name: nix
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            system: x86_64-linux
+          - os: macos-14
+            system: aarch64-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: cachix/cachix-action@v15
+        with:
+          name: sans-self
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # A pull request from a fork has no token; it still reads the cache.
+          skipPush: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+      - run: nix build .#default -L --print-out-paths
+      - run: nix run .#default -- --version
+      - run: nix develop --command cargo fmt --check
+      - run: nix develop --command cargo clippy --all-targets -- -D warnings

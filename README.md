@@ -12,6 +12,29 @@ cannot see: a dropped scenario, a MODIFIED requirement that has no canon
 target, a second open change touching the same requirement. You approve
 items one by one, leave notes, and export them for the pull request.
 
+## Installation
+
+The repository is a nix flake with a package output, so nothing needs
+cloning:
+
+```sh
+nix run github:Sans-Self/OpenSpec-Reviewer/v0.1.0 -- lint
+nix profile install github:Sans-Self/OpenSpec-Reviewer/v0.1.0
+```
+
+CI builds every tag for `x86_64-linux` and `aarch64-darwin` and pushes
+the results to the `sans-self` Cachix cache. Trust it once to skip the
+compile:
+
+```sh
+cachix use sans-self
+```
+
+The `openspec` CLI is a separate npm package the skills call for
+`openspec validate` and `openspec new change`; the reviewer itself does
+not need it. `npm install -g @fission-ai/openspec` or the dev shell's
+wrapper provide it.
+
 ## Usage
 
 Run from the root of a repository that has an `openspec/` directory.

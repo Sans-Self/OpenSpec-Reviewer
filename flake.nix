@@ -32,9 +32,10 @@
         let
           rust = pkgs.rust-bin.stable.latest.default;
           rustPlatform = pkgs.makeRustPlatform { cargo = rust; rustc = rust; };
+          cargo = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package;
           reviewer = rustPlatform.buildRustPackage {
-            pname = "openspec-reviewer";
-            version = "0.1.0";
+            pname = cargo.name;
+            version = cargo.version;
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             # The source tests build throwaway repositories with git.
