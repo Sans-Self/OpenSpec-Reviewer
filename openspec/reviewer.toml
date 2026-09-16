@@ -1,0 +1,28 @@
+[lint]
+# Where tests and other citing source live, and which files to read.
+# tests/ is left out: its fixtures and titles carry citations that are
+# meant to dangle.
+source_roots    = ["src", ".claude"]
+source_globs    = ["**/*.md", "**/*.rs", "**/*.toml", "**/*.ts"]
+skip_dirs       = ["node_modules", "target", "dist", "build", "_build", "deps"]
+
+# Evidence cited from canon specs: paths, regression test names, commits.
+path_prefixes   = ["src", "tests", ".claude"]
+path_extensions = ["md", "rs", "toml", "ts"]
+test_pattern    = "bug__\\w+"
+
+# A call helper that builds `spec:` tags at runtime, if the repository has one.
+# cite_helper   = "cite"
+
+# Change names must start with one of these scopes and a hyphen.
+# change_scopes = ["ui", "api"]
+# grandfathered = ["legacy-change"]
+
+[term_drift]
+max_common = 5
+
+# The glossary capability and how often an undefined span must recur.
+# An empty capability switches the glossary checks off.
+[definitions]
+capability     = "definitions"
+min_recurrence = 3

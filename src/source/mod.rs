@@ -9,6 +9,7 @@ mod gh;
 mod git;
 pub mod lint;
 mod repo;
+pub mod skills;
 
 pub use archive::{load_archives, load_open_changes, Archive};
 pub use canon::{load_canon, CanonError};

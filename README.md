@@ -135,6 +135,93 @@ requirement and a canon requirement in another capability still uses it,
 the pairing gets a warning naming the sibling. A renamed requirement
 whose old name still appears in sibling prose gets the same.
 
+## Glossary
+
+`openspec/specs/definitions/spec.md` is the project's glossary when it
+exists. Each requirement is a term: the name is the word, the body its
+meaning, the scenarios usage examples, and a `- **Deprecated:** old word,
+other word` line lists the words not to use for it. Because a term is an
+ordinary requirement it is cited, renamed, diffed and tracked like any
+other.
+
+The review warns when a delta uses a deprecated synonym or introduces a
+backticked or quoted term twice without defining it, and notes the
+requirements that use a term whose meaning a change edits. The tool
+proposes only what specs already mark with backticks or double quotes,
+and finds defined terms and their synonyms anywhere in prose. `lint` warns
+on deprecated synonyms in canon, notes terms nobody uses, and notes
+spans that recur across capabilities without a definition. In the TUI,
+`D` opens the definitions of the terms the selected requirement uses.
+
+```toml
+[definitions]
+capability     = "definitions"   # which capability is the glossary; "" switches it off
+min_recurrence = 3               # how often an undefined span must recur
+```
+
+## Ignoring a finding
+
+Two checks report things a project sometimes cannot act on: a word
+invented as an example inside a scenario will never have a definition,
+and a requirement about an output format is asserted by tests that
+cannot name it. Both can be dismissed in writing, with the reason next
+to the entry.
+
+```toml
+[[definitions.ignore]]
+term   = "mountType"
+in     = ["citations", "glossary § A term lists the words that are acceptable for it"]
+reason = "a configuration key quoted in prose, not a concept"
+
+[[lint.ignore_uncited]]
+requirement = "citations § Coverage lists citing tests per requirement"
+reason      = "asserted by the ledger snapshot, which cannot cite itself"
+```
+
+Every value is an exact string; nothing is read as a pattern. `in` is
+optional and always an array, each element a capability or a
+`<capability> § <requirement name>`, and without it the term is ignored
+everywhere. An entry with no `reason` is a configuration error.
+
+An ignored requirement still counts in the coverage total, which closes
+with `coverage: <cited>/<total> (<n> ignored)`; a figure that improves
+when somebody edits a configuration is a figure that lies. When an entry
+stops matching anything — the term got defined, the requirement was
+removed, one scope of several went quiet — the tool warns and asks for
+it back out. The verdict comes from the register, every requirement
+canon and the open changes assert, so `lint` and a review say the same
+thing about the same entry.
+
+## Skills
+
+`openspec-reviewer skills install` writes five skills an agent loads to
+work with the reviewer. `opsx-reviewer-workflow` is for the agent: it
+loads on its own in a repository with `openspec/` and the binary, and
+says when to run the review and the lint, what every finding kind means,
+how to write a citation, and which skill to reach for next. The other
+four are for you and the agent both, each with a `/opsx-reviewer:<name>`
+command:
+
+- `define` drafts glossary terms from the lint's recurring undefined
+  terms, into a new change.
+- `cite` adds `spec:` citations to the tests that already exercise
+  uncited requirements.
+- `crossref` judges the siblings a change puts in question, quotes the
+  archived decision if there was one, and drafts sibling deltas into the
+  change.
+- `triage` walks a change's findings in severity order and applies the
+  usual fix to the change's deltas, on confirmation, routing judgment to
+  crossref.
+
+The skills go to `.claude/skills/` and, when `.agents/` exists, to
+`.agents/skills/` for Codex, OpenCode and omp; the commands go to
+`.claude/commands/opsx-reviewer/`. Install never creates `.agents/` and
+refuses without `.claude/`. A file you edit by hand is kept on the next
+install and named; `skills list` shows each file's state. To rewrite a
+skill's instructions for one project, put the body at
+`openspec/reviewer/skills/<name>.md`; the shipped frontmatter stays.
+Every skill writes into a change, never into `openspec/specs/`.
+
 ## Development
 
 ```sh

@@ -17,8 +17,8 @@ rules:
       THEN is what the reviewer can observe. Each is one short sentence.
     - Requirement names are plain active sentences a test title can quote.
     - Use MUST and MUST NOT for rules. Avoid SHALL and SHOULD.
-    - Name the thing: a path, a key, a flag. No "appropriate", "properly",
-      "as expected".
+    - 'Name the thing: a path, a key, a flag. No "appropriate", "properly",
+      "as expected".'
   proposal:
     - Say what the change is, why now, and what it does not do. Under
       600 words.

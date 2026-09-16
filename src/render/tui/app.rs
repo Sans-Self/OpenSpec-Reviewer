@@ -105,6 +105,8 @@ pub struct App {
     pub stores: BTreeMap<String, Store>,
     /// Lines the detail pane can show at once; set by the drawer.
     pub detail_height: u16,
+    /// Pairings whose definitions panel is open, by key.
+    pub definitions_open: std::collections::BTreeSet<String>,
 }
 
 pub const BINDINGS: &[(&str, &str)] = &[
@@ -116,6 +118,7 @@ pub const BINDINGS: &[(&str, &str)] = &[
     ("e", "edit note in $EDITOR"),
     ("H", "history of this requirement"),
     ("m", "cycle display mode (inline, side-by-side, raw)"),
+    ("D", "definitions of the terms this requirement uses"),
     ("PgUp / PgDn, Ctrl-u / Ctrl-d", "scroll the detail pane"),
     ("?", "this help"),
     ("q / Esc", "quit (Esc closes history first)"),
@@ -167,7 +170,23 @@ impl App {
             message: None,
             stores,
             detail_height: 20,
+            definitions_open: std::collections::BTreeSet::new(),
         }
+    }
+
+    /// `D`: toggle the definitions panel for the current pairing.
+    pub fn toggle_definitions(&mut self) {
+        let Some(key) = self.current_pairing().map(Pairing::key) else {
+            return;
+        };
+        if !self.definitions_open.remove(&key) {
+            self.definitions_open.insert(key);
+        }
+    }
+
+    pub fn definitions_shown(&self) -> bool {
+        self.current_pairing()
+            .is_some_and(|p| self.definitions_open.contains(&p.key()))
     }
 
     pub fn current_row(&self) -> Option<&Row> {
@@ -483,6 +502,7 @@ impl App {
             }
             (KeyCode::Char('H'), false) => self.open_history(),
             (KeyCode::Char('m'), false) => self.mode = self.mode.next(),
+            (KeyCode::Char('D'), false) => self.toggle_definitions(),
             (KeyCode::Char('?'), false) => self.view = View::Help,
             (KeyCode::PageDown, _) | (KeyCode::Char('d'), true) => {
                 self.scroll_by(i32::from(self.detail_height / 2).max(1))

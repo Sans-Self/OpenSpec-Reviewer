@@ -262,3 +262,70 @@ fn a_change_is_its_artefacts_plus_its_deltas__change_name_under_archive() {
     );
     assert!(err.to_string().contains("archived"));
 }
+
+#[test]
+fn the_register_is_every_requirement_canon_and_open_changes_assert__canon_and_an_open_change() {
+    use openspec_reviewer::model::Register;
+    let mut canon = canon_of("alpha", "# alpha\n\n## Requirements\n\n### Requirement: One\n\nBody.\n\n#### Scenario: S\n\n- **WHEN** a\n- **THEN** b\n");
+    canon.specs.insert(
+        "beta".into(),
+        parse_canon_spec("# beta\n\n## Requirements\n\n### Requirement: Two\n\nBody.\n\n#### Scenario: S\n\n- **WHEN** a\n- **THEN** b\n"),
+    );
+    let delta = delta_of(
+        "alpha",
+        "## ADDED Requirements\n\n### Requirement: Three\n\nBody.\n\n#### Scenario: S\n\n- **WHEN** a\n- **THEN** b\n",
+    );
+    let register = Register::build(&canon, &[delta]);
+    let held: Vec<String> = register.entries().map(|e| e.to_string()).collect();
+    assert_eq!(
+        held,
+        vec!["alpha § One", "alpha § Three", "beta § Two"],
+        "canon and the open change, all three"
+    );
+}
+
+#[test]
+fn the_register_is_every_requirement_canon_and_open_changes_assert__stable_order() {
+    use openspec_reviewer::model::Register;
+    let mut canon = canon_of("beta", "# beta\n\n## Requirements\n\n### Requirement: Two\n\nBody.\n\n#### Scenario: S\n\n- **WHEN** a\n- **THEN** b\n");
+    canon.specs.insert(
+        "alpha".into(),
+        parse_canon_spec("# alpha\n\n## Requirements\n\n### Requirement: One\n\nBody.\n\n#### Scenario: S\n\n- **WHEN** a\n- **THEN** b\n"),
+    );
+    let register = Register::build(&canon, &[]);
+    let held: Vec<String> = register.entries().map(|e| e.to_string()).collect();
+    assert_eq!(held, vec!["alpha § One", "beta § Two"]);
+}
+
+#[test]
+fn the_register_is_every_requirement_canon_and_open_changes_assert__same_register_in_both_commands()
+{
+    use openspec_reviewer::model::{DeltaSpec, Register};
+    use openspec_reviewer::source::{load_canon, load_open_changes, Workspace};
+    let repo = Repo::from_fixture("ignores");
+    let root = repo.root();
+
+    // What a review loads: canon plus every open change on disk.
+    let review = Register::build(
+        &load_canon(root).expect("canon"),
+        &load_open_changes(root, &[])
+            .into_iter()
+            .flat_map(|(_, deltas)| deltas)
+            .collect::<Vec<_>>(),
+    );
+
+    // What the lint loads: the workspace it walks for citations.
+    let config = openspec_reviewer::citations::require_config(root).expect("config");
+    let workspace = Workspace::load(root, &config.lint).expect("workspace");
+    let lint = Register::build(
+        &workspace.canon,
+        &workspace
+            .changes
+            .iter()
+            .flat_map(|c| c.deltas.iter().cloned())
+            .collect::<Vec<DeltaSpec>>(),
+    );
+
+    assert_eq!(review, lint);
+    assert!(review.contains("gamma", "The ledger stamps the run it came from"));
+}

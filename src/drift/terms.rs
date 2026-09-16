@@ -18,6 +18,22 @@ pub struct RemovedTerm {
     pub text: String,
 }
 
+/// Every backticked span and double-quoted string in `text`, the two tiers
+/// the glossary checks and term drift share. A `spec:` citation is not a
+/// term: the citation lint owns those.
+pub fn quoted_spans(text: &str) -> BTreeSet<String> {
+    let backtick = Regex::new("`([^`\n]+)`").expect("compiles");
+    let quoted = Regex::new("\"([^\"\n]+)\"").expect("compiles");
+    let mut out = spans(&backtick, text);
+    out.extend(spans(&quoted, text));
+    out.retain(|s| !is_citation(s));
+    out
+}
+
+fn is_citation(span: &str) -> bool {
+    span.trim_start().starts_with("spec:")
+}
+
 fn spans(re: &Regex, text: &str) -> BTreeSet<String> {
     re.captures_iter(text)
         .map(|c| c[1].trim().to_string())
@@ -103,6 +119,7 @@ pub fn removed_terms(
         out.extend(
             spans(re, &before)
                 .into_iter()
+                .filter(|s| !is_citation(s))
                 .filter(|s| !after_lower.contains(&s.to_lowercase()))
                 .map(|text| RemovedTerm { tier, text }),
         );

@@ -364,7 +364,7 @@ fn the_lint_is_a_subcommand_with_a_summary__clean_repository() {
         .to_string();
     assert_eq!(
         line,
-        "lint: 2 specs, 1 changes, 1 paths, 1 tests, 0 hashes, 6 citations checked, 0 errors"
+        "lint: 2 specs, 1 changes, 1 paths, 1 tests, 0 hashes, 6 citations checked, 0 errors; no glossary"
     );
     assert_eq!(out.status.code(), Some(0));
 }
@@ -750,4 +750,281 @@ fn a_citation_names_a_capability_and_a_requirement__opake_prose_fixture() {
         ledger.contains("[1] indexed_at is first-seen"),
         "sentence-final period dropped: {ledger}"
     );
+}
+
+/// The fixture's configuration, with `find` replaced by `with`.
+fn retune(repo: &Repo, find: &str, with: &str) {
+    let toml = std::fs::read_to_string(repo.root().join("openspec/reviewer.toml")).unwrap();
+    assert!(toml.contains(find), "{find} is in the fixture config");
+    repo.write("openspec/reviewer.toml", &toml.replace(find, with));
+}
+
+/// Every undefined-term note the lint prints, term included.
+fn notes(out: &std::process::Output) -> String {
+    stdout(out)
+        .lines()
+        .filter(|l| l.contains("without definition") || l.starts_with("    "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn warnings(out: &std::process::Output) -> Vec<String> {
+    stdout(out)
+        .lines()
+        .filter(|l| l.starts_with("warning:"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__ignored_term() {
+    let repo = Repo::from_fixture("ignores");
+    retune(&repo, "min_recurrence = 3", "min_recurrence = 1");
+    let out = lint_in(&repo, &[]);
+    assert!(
+        !notes(&out).contains("`mountType`"),
+        "the entry silences it: {}",
+        notes(&out)
+    );
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__entry_without_a_reason() {
+    let repo = Repo::from_fixture("ignores");
+    retune(
+        &repo,
+        "term   = \"wharfMaster\"\nreason = \"left over from the harbour prototype\"",
+        "term   = \"wharfMaster\"",
+    );
+    let out = lint_in(&repo, &[]);
+    assert!(stderr(&out).contains("wharfMaster"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("reason"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__entry_is_not_a_pattern() {
+    let repo = Repo::from_fixture("ignores");
+    retune(&repo, "min_recurrence = 3", "min_recurrence = 1");
+    retune(&repo, "term   = \"mountType\"", "term   = \"mount\"");
+    let out = lint_in(&repo, &[]);
+    assert!(
+        notes(&out).contains("`mountType`"),
+        "an ignore for `mount` is not a prefix rule: {}",
+        notes(&out)
+    );
+}
+
+#[test]
+fn an_ignore_entry_can_be_confined_to_scopes__scoped_to_one_capability() {
+    let repo = Repo::from_fixture("ignores");
+    retune(&repo, "min_recurrence = 3", "min_recurrence = 1");
+    retune(
+        &repo,
+        "term   = \"mountType\"\nreason",
+        "term   = \"mountType\"\nin     = [\"alpha\"]\nreason",
+    );
+    let out = lint_in(&repo, &[]);
+    let notes = notes(&out);
+    assert!(notes.contains("`mountType`"), "{notes}");
+    assert!(
+        !notes.contains("alpha § A route records its mountType"),
+        "the scoped capability is not listed: {notes}"
+    );
+    assert!(
+        notes.contains("beta § A mount names its feature"),
+        "the others still are: {notes}"
+    );
+}
+
+#[test]
+fn an_ignore_entry_can_be_confined_to_scopes__scoped_to_two_capabilities() {
+    let repo = Repo::from_fixture("ignores");
+    retune(&repo, "min_recurrence = 3", "min_recurrence = 1");
+    let out = lint_in(&repo, &[]);
+    assert!(
+        !notes(&out).contains("`custodian`"),
+        "both capabilities it appears in are scoped: {}",
+        notes(&out)
+    );
+}
+
+#[test]
+fn an_ignore_entry_can_be_confined_to_scopes__scoped_to_one_requirement() {
+    let repo = Repo::from_fixture("ignores");
+    retune(&repo, "min_recurrence = 3", "min_recurrence = 1");
+    retune(
+        &repo,
+        "in     = [\"alpha\", \"beta\"]",
+        "in     = [\"alpha § A route records its mountType\", \"beta § A custodian approves a mount\"]",
+    );
+    retune(&repo, "term   = \"mountType\"", "term   = \"mounted\"");
+    let out = lint_in(&repo, &[]);
+    let notes = notes(&out);
+    assert!(
+        notes.contains("beta § A mount names its feature"),
+        "the other requirement of the capability still reports: {notes}"
+    );
+}
+
+#[test]
+fn an_ignore_entry_can_be_confined_to_scopes__scope_is_a_bare_string() {
+    let repo = Repo::from_fixture("ignores");
+    retune(
+        &repo,
+        "in     = [\"alpha\", \"beta\"]",
+        "in     = \"alpha\"",
+    );
+    let out = lint_in(&repo, &[]);
+    assert!(stderr(&out).contains("custodian"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("array"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn a_dangling_ignore_entry_is_a_warning__term_now_defined() {
+    let repo = Repo::from_fixture("ignores");
+    repo.append(
+        "openspec/specs/definitions/spec.md",
+        "\n### Requirement: mountType\n\nHow a route attaches a page.\n\n#### Scenario: In a sentence\n\n- **WHEN** a spec says mountType\n- **THEN** it means this\n",
+    );
+    let found = warnings(&lint_in(&repo, &[]));
+    let hit = found
+        .iter()
+        .find(|w| w.contains("`mountType`"))
+        .unwrap_or_else(|| panic!("{found:?}"));
+    assert!(hit.contains("openspec/reviewer.toml"), "{hit}");
+    assert!(hit.contains("glossary already accounts for"), "{hit}");
+}
+
+#[test]
+fn a_dangling_ignore_entry_is_a_warning__ignored_requirement_is_gone() {
+    let repo = Repo::from_fixture("ignores");
+    retune(
+        &repo,
+        "gamma § The ledger prints one line per entry",
+        "gamma § The ledger prints one line per epoch",
+    );
+    let found = warnings(&lint_in(&repo, &[]));
+    let hit = found
+        .iter()
+        .find(|w| w.contains("one line per epoch"))
+        .unwrap_or_else(|| panic!("{found:?}"));
+    assert!(hit.contains("ignore_uncited"), "{hit}");
+    assert!(hit.contains("openspec/reviewer.toml"), "{hit}");
+}
+
+#[test]
+fn a_dangling_ignore_entry_is_a_warning__one_scope_of_two_is_dead() {
+    let repo = Repo::from_fixture("ignores");
+    retune(&repo, "min_recurrence = 3", "min_recurrence = 1");
+    let beta = std::fs::read_to_string(repo.root().join("openspec/specs/beta/spec.md")).unwrap();
+    repo.write(
+        "openspec/specs/beta/spec.md",
+        &beta.replace("the workspace `custodian`", "the workspace owner"),
+    );
+    let out = lint_in(&repo, &[]);
+    let found = warnings(&out);
+    let hit = found
+        .iter()
+        .find(|w| w.contains("`custodian`"))
+        .unwrap_or_else(|| panic!("{found:?}"));
+    assert!(hit.contains("scope `beta`"), "the dead scope: {hit}");
+    assert!(hit.contains("silences nothing"), "{hit}");
+    assert!(
+        !notes(&out).contains("`custodian`"),
+        "the live scope still silences: {}",
+        notes(&out)
+    );
+}
+
+#[test]
+fn a_dangling_ignore_entry_is_a_warning__unknown_capability_in_a_scope() {
+    let repo = Repo::from_fixture("ignores");
+    retune(
+        &repo,
+        "in     = [\"alpha\", \"beta\"]",
+        "in     = [\"alpha\", \"sitemap-index\"]",
+    );
+    let found = warnings(&lint_in(&repo, &[]));
+    let hit = found
+        .iter()
+        .find(|w| w.contains("sitemap-index"))
+        .unwrap_or_else(|| panic!("{found:?}"));
+    assert!(hit.contains("names no capability or requirement"), "{hit}");
+}
+
+#[test]
+fn a_dangling_ignore_entry_is_a_warning__same_verdict_during_a_review() {
+    let repo = Repo::from_fixture("ignores");
+    let lint = warnings(&lint_in(&repo, &[]));
+    let dangling = lint
+        .iter()
+        .find(|w| w.contains("wharfMaster"))
+        .unwrap_or_else(|| panic!("{lint:?}"))
+        .trim_start_matches("warning:")
+        .trim()
+        .to_string();
+    let review = run_in(
+        repo.root(),
+        &[
+            "--findings-only",
+            "--no-state",
+            "change",
+            "ledger-freshness",
+        ],
+    );
+    assert!(
+        stdout(&review).contains(&dangling),
+        "the review says what the lint says: {}",
+        stdout(&review)
+    );
+}
+
+#[test]
+fn coverage_lists_citing_tests_per_requirement__the_uncited_requirement_is_ignored() {
+    let repo = Repo::from_fixture("ignores");
+    let text = stdout(&lint_in(&repo, &["--coverage"]));
+    assert!(
+        text.contains("[0] The ledger prints one line per entry  <- ignored"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[0] A custodian approves a mount  <- uncited"),
+        "the others are still marked: {text}"
+    );
+    assert!(text.contains("coverage: 4/8 (1 ignored)"), "{text}");
+}
+
+#[test]
+fn configuration_lives_beside_the_specs__init_documents_the_ignore_sections() {
+    let repo = Repo::from_fixture("ignores");
+    repo.remove("openspec/reviewer.toml");
+    assert_eq!(lint_in(&repo, &["init"]).status.code(), Some(0));
+    let text = std::fs::read_to_string(repo.root().join("openspec/reviewer.toml")).unwrap();
+    assert!(text.contains("# [[definitions.ignore]]"), "{text}");
+    assert!(text.contains("# [[lint.ignore_uncited]]"), "{text}");
+    assert!(
+        text.contains("# reason"),
+        "the examples carry a reason: {text}"
+    );
+    // The commented blocks alone, uncommented: the examples must parse.
+    let mut uncommented = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        let bare = line.trim_start_matches("# ");
+        if bare.starts_with("[[") {
+            inside = true;
+        } else if !line.starts_with('#') {
+            inside = false;
+        }
+        if inside {
+            uncommented.push(bare);
+        }
+    }
+    openspec_reviewer::citations::config::parse_config(
+        std::path::Path::new("openspec/reviewer.toml"),
+        &uncommented.join("\n"),
+    )
+    .expect("the commented examples are valid configuration");
 }

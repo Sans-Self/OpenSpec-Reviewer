@@ -122,6 +122,8 @@ throughout, consistent with the foundation.
 
 ## Prompt overrides
 
+`openspec/reviewer/` is the one store for agent-facing text: `prompts/`
+here, `skills/` for the skill overrides `reviewer-skills` defines.
 `openspec/reviewer/prompts/{pairing,change,hints}.md` override the
 built-ins by name. `assist prompts` writes the built-ins there without
 clobbering, printing which files it wrote and which it skipped. The

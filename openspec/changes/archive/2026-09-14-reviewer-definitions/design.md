@@ -21,7 +21,7 @@ same change counts as defined. Every check is a function from
 
 ```rust
 struct Term {
-    name: String,            // requirement name, e.g. "module"
+    name: String,            // requirement name, e.g. "group key"
     meaning: String,         // body with the Deprecated: line removed
     deprecated: Vec<String>, // ISO 704 deprecated terms
     examples: Vec<Scenario>, // the requirement's scenarios
@@ -39,19 +39,19 @@ list shows up as a change.
 
 ## Matching
 
-Whole-word, case-insensitive. A synonym `feature` must not fire on
-`featured`, and a term `module` must not fire on `modules`? It should:
+Whole-word, case-insensitive. A synonym `admin` must not fire on
+`administrative`, and a term `manager` must not fire on `managers`? It should:
 plural forms are the same word. The matcher therefore treats a trailing
 `s` or `es` on the candidate as the same word, and nothing else. No
 stemming library; the two suffixes cover the cases the fixtures show and
 anything cleverer is guessing.
 
-Multi-word synonyms (`feature mount`) match across a single space in
+Multi-word synonyms (`workspace key`) match across a single space in
 normalized text, which is what normalization guarantees.
 
 Citations are stripped before matching: any `spec:…§…` span up to its
 closing delimiter is blanked, so a citation of a requirement named
-"Feature mount appears" does not count as using the synonym.
+"Admin API mints invites" does not count as using the synonym.
 
 ## The four checks
 
@@ -96,7 +96,9 @@ the summary line says so.
 
 ## Testing
 
-A fixture glossary with `module` (`Deprecated: feature, feature mount`) and
-`website` (`Deprecated: tenant`), lifted from rel-monorepo's actual renames, and
-a fixture canon that uses both words plus one synonym. One test per
+A fixture glossary with `group key` (`Deprecated: workspace key, rotation
+key`) and `manager` (`Deprecated: admin, owner`), lifted from Opake's
+canon, where `document-crypto` still says *workspace key* and
+`workspace-membership` rules out the *owner* role in prose, and a fixture
+canon that uses both terms plus one synonym. One test per
 requirement; the substring and citation exclusions as regression tests.

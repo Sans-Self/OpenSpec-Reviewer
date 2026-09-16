@@ -157,8 +157,27 @@ pub fn render(review: &Review, options: TextOptions) -> String {
             out.push('\n');
         }
     }
-    let _ = writeln!(out, "summary: {}", review.summary);
+    write_notices(&mut out, review, colour);
+    let _ = writeln!(
+        out,
+        "summary: {}; {}",
+        review.summary,
+        review.glossary_summary()
+    );
     out
+}
+
+/// Findings about the configuration: the same lines the lint prints.
+fn write_notices(out: &mut String, review: &Review, colour: bool) {
+    for n in &review.notices {
+        let _ = writeln!(
+            out,
+            "{}: {}: {}",
+            paint(colour, severity_code(n.severity), &n.severity.to_string()),
+            n.file,
+            n.message
+        );
+    }
 }
 
 /// One line per finding: `severity  change/capability/requirement: message`.
@@ -169,6 +188,14 @@ pub fn render_findings_only(review: &Review) -> String {
             let _ = writeln!(out, "{:<7}  {}: {}", f.severity, f.location, f.message);
         }
     }
-    let _ = writeln!(out, "summary: {}", review.summary);
+    for n in &review.notices {
+        let _ = writeln!(out, "{:<7}  {}: {}", n.severity, n.file, n.message);
+    }
+    let _ = writeln!(
+        out,
+        "summary: {}; {}",
+        review.summary,
+        review.glossary_summary()
+    );
     out
 }

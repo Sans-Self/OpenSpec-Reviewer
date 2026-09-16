@@ -72,6 +72,20 @@ pub struct Review {
     pub changes: Vec<ChangeReview>,
     pub canon_edits: Vec<CanonEdit>,
     pub summary: Summary,
+    /// The project's glossary, as the change under review leaves it.
+    #[serde(rename = "definitions", serialize_with = "terms_only")]
+    pub glossary: crate::glossary::Glossary,
+    /// Findings about the configuration rather than about a pairing, so a
+    /// review says what the lint says about a dangling ignore entry.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<crate::citations::LintFinding>,
+}
+
+fn terms_only<S: serde::Serializer>(
+    g: &crate::glossary::Glossary,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    g.terms.serialize(s)
 }
 
 impl Review {
@@ -82,11 +96,41 @@ impl Review {
             changes,
             canon_edits,
             summary,
+            glossary: crate::glossary::Glossary::default(),
+            notices: Vec::new(),
+        }
+    }
+
+    pub fn with_notices(mut self, notices: Vec<crate::citations::LintFinding>) -> Review {
+        self.notices = notices;
+        self.recount();
+        self
+    }
+
+    pub fn with_glossary(mut self, glossary: crate::glossary::Glossary) -> Review {
+        self.glossary = glossary;
+        self
+    }
+
+    /// `glossary: 2 terms`, or `no glossary`, for summary lines.
+    pub fn glossary_summary(&self) -> String {
+        match self.glossary.terms.len() {
+            0 => "no glossary".to_string(),
+            1 => "glossary: 1 term".to_string(),
+            n => format!("glossary: {n} terms"),
         }
     }
 
     pub fn recount(&mut self) {
-        self.summary = Summary::of(self.changes.iter().flat_map(ChangeReview::findings));
+        let mut summary = Summary::of(self.changes.iter().flat_map(ChangeReview::findings));
+        for n in &self.notices {
+            match n.severity {
+                Severity::Error => summary.errors += 1,
+                Severity::Warning => summary.warnings += 1,
+                Severity::Note => summary.notes += 1,
+            }
+        }
+        self.summary = summary;
     }
 
     pub fn pairings(&self) -> impl Iterator<Item = &Pairing> {

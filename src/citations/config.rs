@@ -1,6 +1,7 @@
 //! `openspec/reviewer.toml`: what one repository has to say about itself
 //! before the lint knows where to look.
 
+use crate::model::{Entry, Ignores, Scope, TermIgnore};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ pub const CONFIG_PATH: &str = "openspec/reviewer.toml";
 /// under them. Anything outside these lists is not a citation target the
 /// lint knows what to do with.
 pub const CANDIDATE_ROOTS: &[&str] = &[
-    "src", "lib", "apps", "packages", "crates", "services", "tests", "test",
+    "src", "lib", "apps", "packages", "crates", "services", "tests", "test", ".claude", ".agents",
 ];
 pub const CANDIDATE_EXTENSIONS: &[&str] = &[
     "rs", "ts", "tsx", "js", "mjs", "mts", "py", "go", "ex", "exs", "heex", "md", "json", "yaml",
@@ -83,6 +84,24 @@ test_pattern    = "bug__\\w+"
 
 [term_drift]
 max_common = 5
+
+# The glossary capability and how often an undefined span must recur.
+# An empty capability switches the glossary checks off.
+[definitions]
+capability     = "definitions"
+min_recurrence = 3
+
+# Findings read and dismissed. Every entry says why, and the lint warns when
+# one stops matching anything. `in` confines a term to whole capabilities or
+# to single requirements; without it the term is ignored everywhere.
+# [[definitions.ignore]]
+# term   = "mountType"
+# in     = ["citations", "glossary § A term lists the words that are acceptable for it"]
+# reason = "a configuration key quoted in prose, not a concept"
+
+# [[lint.ignore_uncited]]
+# requirement = "citations § Coverage lists citing tests per requirement"
+# reason      = "asserted by the ledger snapshot, which cannot cite itself"
 "#,
         roots = toml_list(survey.roots.iter().cloned()),
         globs = toml_list(
@@ -105,6 +124,140 @@ pub struct Config {
     pub lint: Lint,
     #[serde(default)]
     pub term_drift: TermDrift,
+    #[serde(default)]
+    pub definitions: Definitions,
+}
+
+impl Config {
+    /// The requirements `[[lint.ignore_uncited]]` names, as register entries.
+    /// An entry that names no requirement resolves against nothing, which is
+    /// what the dangling check reports.
+    pub fn ignored_requirements(&self) -> BTreeSet<Entry> {
+        self.lint
+            .ignore_uncited
+            .iter()
+            .filter_map(|e| Entry::parse(&e.requirement))
+            .collect()
+    }
+
+    /// Every ignore entry says why it is there, and confines itself with an
+    /// array. Checked once, at the edge, so the rest of the tool can read
+    /// the lists as given.
+    fn validate(&self, path: &Path) -> Result<(), ConfigError> {
+        for entry in &self.definitions.ignore {
+            if matches!(entry.within, Some(Scopes::Bare(_))) {
+                return Err(ConfigError::ScopeNotAnArray {
+                    path: path.to_path_buf(),
+                    entry: entry.term.clone(),
+                });
+            }
+            if entry.reason.is_none() {
+                return Err(ConfigError::IgnoreWithoutReason {
+                    path: path.to_path_buf(),
+                    list: "[[definitions.ignore]]",
+                    entry: entry.term.clone(),
+                });
+            }
+        }
+        for entry in &self.lint.ignore_uncited {
+            if entry.reason.is_none() {
+                return Err(ConfigError::IgnoreWithoutReason {
+                    path: path.to_path_buf(),
+                    list: "[[lint.ignore_uncited]]",
+                    entry: entry.requirement.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `[definitions]`: which capability is the glossary and how often a span
+/// must recur before the lint suggests defining it. Absent means defaults,
+/// never a refusal.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Definitions {
+    #[serde(default = "default_capability")]
+    pub capability: String,
+    #[serde(default = "default_min_recurrence")]
+    pub min_recurrence: usize,
+    /// `[[definitions.ignore]]`: undefined-term findings read and dismissed.
+    #[serde(default)]
+    pub ignore: Vec<IgnoreTerm>,
+}
+
+/// One dismissed term. `parse_config` is the only way in, and it refuses an
+/// entry without a reason and an `in` that is not an array, so a consumer
+/// never sees either.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IgnoreTerm {
+    pub term: String,
+    #[serde(rename = "in")]
+    pub within: Option<Scopes>,
+    pub reason: Option<String>,
+}
+
+/// `in` is an array of scopes. A bare string parses so that the refusal can
+/// name the entry rather than the shape.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum Scopes {
+    List(Vec<String>),
+    Bare(String),
+}
+
+impl IgnoreTerm {
+    /// The scopes the entry is confined to; empty is the whole repository.
+    pub fn scopes(&self) -> Vec<Scope> {
+        match &self.within {
+            Some(Scopes::List(items)) => items.iter().map(|s| Scope::parse(s)).collect(),
+            Some(Scopes::Bare(_)) | None => Vec::new(),
+        }
+    }
+}
+
+/// One requirement the coverage ledger must not mark uncited.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IgnoreUncited {
+    pub requirement: String,
+    pub reason: Option<String>,
+}
+
+impl Definitions {
+    /// The dismissed terms as the checks read them.
+    pub fn ignores(&self) -> Ignores {
+        Ignores {
+            terms: self
+                .ignore
+                .iter()
+                .map(|e| TermIgnore {
+                    term: e.term.clone(),
+                    scopes: e.scopes(),
+                })
+                .collect(),
+        }
+    }
+}
+
+fn default_capability() -> String {
+    crate::glossary::DEFAULT_CAPABILITY.to_string()
+}
+
+fn default_min_recurrence() -> usize {
+    crate::glossary::DEFAULT_MIN_RECURRENCE
+}
+
+impl Default for Definitions {
+    fn default() -> Definitions {
+        Definitions {
+            capability: default_capability(),
+            min_recurrence: default_min_recurrence(),
+            ignore: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -121,6 +274,9 @@ pub struct Lint {
     pub change_scopes: Option<Vec<String>>,
     #[serde(default)]
     pub grandfathered: Vec<String>,
+    /// `[[lint.ignore_uncited]]`: requirements the ledger must not mark.
+    #[serde(default)]
+    pub ignore_uncited: Vec<IgnoreUncited>,
 }
 
 impl Lint {
@@ -174,6 +330,14 @@ pub enum ConfigError {
     },
     #[error("{path}: {message}")]
     Malformed { path: PathBuf, message: String },
+    #[error("{path}: {list} entry `{entry}` has no `reason`; an ignore without a reason cannot be audited")]
+    IgnoreWithoutReason {
+        path: PathBuf,
+        list: &'static str,
+        entry: String,
+    },
+    #[error("{path}: [[definitions.ignore]] entry `{entry}`: `in` is an array of scopes, as in `in = [\"citations\"]`")]
+    ScopeNotAnArray { path: PathBuf, entry: String },
 }
 
 /// Write the rendered survey to `openspec/reviewer.toml`. `create_new`
@@ -209,10 +373,12 @@ pub fn write_init(root: &Path, survey: &Survey) -> Result<PathBuf, ConfigError> 
 }
 
 pub fn parse_config(path: &Path, text: &str) -> Result<Config, ConfigError> {
-    toml::from_str(text).map_err(|e| ConfigError::Malformed {
+    let config: Config = toml::from_str(text).map_err(|e| ConfigError::Malformed {
         path: path.to_path_buf(),
         message: e.message().to_string(),
-    })
+    })?;
+    config.validate(path)?;
+    Ok(config)
 }
 
 /// The config when the file exists, `Ok(None)` when it does not. The lint
