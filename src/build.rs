@@ -209,12 +209,32 @@ fn join_glossary(
         .map(|t| t.name.clone())
         .collect();
     let canon_hits = glossary::deprecated_in_canon(&glossary, canon);
+    let unbound: Vec<(String, Option<String>)> = glossary::unbound_terms(&glossary)
+        .into_iter()
+        .map(|t| {
+            (
+                t.name.clone(),
+                t.binding.names_another().map(str::to_string),
+            )
+        })
+        .collect();
     for p in pairings
         .iter()
         .filter(|p| p.capability == glossary.capability)
     {
         if unused.iter().any(|u| u.eq_ignore_ascii_case(&p.name)) {
             extra.push(Finding::new(FindingKind::DefinedButUnused, p.location()));
+        }
+        for (_, names) in unbound
+            .iter()
+            .filter(|(t, _)| t.eq_ignore_ascii_case(&p.name))
+        {
+            extra.push(Finding::new(
+                FindingKind::TermWithoutBindingLine {
+                    names: names.clone(),
+                },
+                p.location(),
+            ));
         }
         for hit in canon_hits
             .iter()

@@ -66,6 +66,9 @@ else the change touches.
 - `new_term_undefined`: the change introduces a backticked or quoted
   term twice with no glossary entry. Define it with `define`, or drop
   the backticks if it is not vocabulary.
+- `term_without_binding_line`: a glossary term whose body does not open
+  with ``A spec MUST use `<term>` to mean:``. Add the line, naming the
+  requirement; without it `openspec validate` rejects the term.
 
 ### Notes
 

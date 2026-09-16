@@ -6,9 +6,40 @@ pub mod synonyms;
 
 pub use checks::{
     deprecated_in_canon, deprecated_in_pairings, new_undefined, recurring_undefined, term_in_use,
-    unused_terms, CanonHit, Recurring,
+    unbound_terms, unused_terms, CanonHit, Recurring,
 };
 pub use synonyms::{parse_markers, Markers, Matcher};
+
+/// Whether a term's body opens with the binding line that names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Binding {
+    Bound,
+    /// The body opens with a binding line naming a different word.
+    NamesAnother(String),
+    Missing,
+}
+
+impl Binding {
+    fn of(name: &str, line: Option<&str>) -> Binding {
+        match line {
+            None => Binding::Missing,
+            Some(named) if named.eq_ignore_ascii_case(name) => Binding::Bound,
+            Some(named) => Binding::NamesAnother(named.to_string()),
+        }
+    }
+
+    pub fn is_bound(&self) -> bool {
+        matches!(self, Binding::Bound)
+    }
+
+    /// The word a mismatched binding line names.
+    pub fn names_another(&self) -> Option<&str> {
+        match self {
+            Binding::NamesAnother(other) => Some(other),
+            _ => None,
+        }
+    }
+}
 
 use crate::model::{Canon, DeltaKind, DeltaSpec, Requirement, Scenario};
 use serde::Serialize;
@@ -18,7 +49,9 @@ pub const DEFAULT_MIN_RECURRENCE: usize = 3;
 
 /// A glossary entry. The name is the term, the body its meaning, the
 /// scenarios usage examples; `- **Admitted:**` lists the other words that
-/// mean it and `- **Deprecated:**` the words not to use for it.
+/// mean it and `- **Deprecated:**` the words not to use for it. The
+/// binding is not serialized: the JSON glossary is what a term means, not
+/// how it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Term {
     #[serde(rename = "term")]
@@ -26,6 +59,8 @@ pub struct Term {
     pub meaning: String,
     pub admitted: Vec<String>,
     pub deprecated: Vec<String>,
+    #[serde(skip)]
+    pub binding: Binding,
     #[serde(skip)]
     pub examples: Vec<Scenario>,
 }
@@ -38,6 +73,7 @@ impl Term {
             meaning: m.meaning,
             admitted: m.admitted,
             deprecated: m.deprecated,
+            binding: Binding::of(&req.name, m.binding.as_deref()),
             examples: req.scenarios.clone(),
         }
     }

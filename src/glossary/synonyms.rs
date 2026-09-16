@@ -1,4 +1,5 @@
-//! The acceptability marker lines and the whole-word matcher.
+//! The binding line, the acceptability marker lines and the whole-word
+//! matcher.
 
 use crate::citations::Grammar;
 use regex::Regex;
@@ -18,12 +19,33 @@ const MARKERS: [(Marker, &str); 2] = [
     (Marker::Deprecated, "- **Deprecated:**"),
 ];
 
+/// The halves of the line that opens a term's body and states what the
+/// glossary asserts: that one word has one meaning across every spec.
+const BINDING: (&str, &str) = ("A spec MUST use ", " to mean:");
+
 /// A term's body split into prose and the words each marker line listed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Markers {
     pub meaning: String,
     pub admitted: Vec<String>,
     pub deprecated: Vec<String>,
+    /// The term the binding line names, absent when the body opens
+    /// straight into its meaning.
+    pub binding: Option<String>,
+}
+
+/// The term a binding line names, backticked or bare. The keyword is
+/// matched case-sensitively: `openspec validate` counts only an
+/// uppercase MUST, and a lowercase one would satisfy us and not it.
+fn binding_term(line: &str) -> Option<&str> {
+    let term = line
+        .trim()
+        .strip_prefix(BINDING.0)?
+        .strip_suffix(BINDING.1)?
+        .trim()
+        .trim_matches('`')
+        .trim();
+    (!term.is_empty()).then_some(term)
 }
 
 fn listed(rest: &str) -> impl Iterator<Item = String> + '_ {
@@ -32,9 +54,11 @@ fn listed(rest: &str) -> impl Iterator<Item = String> + '_ {
         .filter(|s| !s.is_empty())
 }
 
-/// The body without its marker lines, and the words each one listed.
-/// Removing a marker line takes the blank line that followed it with it,
-/// so two markers in a row do not leave a gap in the prose.
+/// The body without its binding line and its marker lines, the term the
+/// binding line named, and the words each marker listed. Removing a line
+/// takes the blank line that followed it with it, so two markers in a row
+/// do not leave a gap in the prose. Only the line that opens the body is
+/// read as the binding line; the same sentence further down is prose.
 pub fn parse_markers(body: &str) -> Markers {
     let mut out = Markers::default();
     let mut meaning: Vec<&str> = Vec::new();
@@ -54,6 +78,14 @@ pub fn parse_markers(body: &str) -> Markers {
                 removed = true;
             }
             None => {
+                let opening =
+                    out.binding.is_none() && meaning.iter().all(|l: &&str| l.trim().is_empty());
+                if let Some(term) = binding_term(line).filter(|_| opening) {
+                    out.binding = Some(term.to_string());
+                    meaning.clear();
+                    removed = true;
+                    continue;
+                }
                 let blank = line.trim().is_empty();
                 let after_blank = meaning.last().is_none_or(|l| l.trim().is_empty());
                 if removed && blank && after_blank {

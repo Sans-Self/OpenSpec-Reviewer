@@ -360,6 +360,7 @@ fn the_define_skill_drafts_glossary_terms__three_candidates_one_kept() {
     assert!(body.contains("openspec/changes/<name>/specs/definitions/spec.md"));
     assert!(body.contains("## ADDED Requirements"));
     assert!(body.contains("### Requirement: <term>"));
+    assert!(body.contains("A spec MUST use `<term>` to mean:"));
     assert!(body.contains("- **Deprecated:**"));
     assert!(body.contains("openspec-reviewer change <name>"));
 }
@@ -455,4 +456,172 @@ fn lint_init_writes_a_starting_configuration__agent_directories_are_roots() {
         .find(|l| l.starts_with("source_globs"))
         .unwrap();
     assert!(globs.contains("**/*.md"), "{globs}");
+}
+
+/// A markdown block a skill instructs an agent to write, with the
+/// capability its delta belongs to.
+struct Drafted {
+    skill: &'static str,
+    capability: String,
+    delta: String,
+}
+
+/// Every fenced block in a skill body that is a delta spec, with the
+/// angle-bracket placeholders filled in. A skill that starts instructing
+/// another artefact shape is swept without touching this test.
+fn drafted_deltas() -> Vec<Drafted> {
+    let filled = |block: &str| {
+        let sample = "the ledger gains an entry";
+        block
+            .replace("<term>", "ledger")
+            .split_inclusive('\n')
+            .map(|line| {
+                let mut out = String::new();
+                let mut rest = line;
+                while let Some(open) = rest.find('<') {
+                    match rest[open..].find('>') {
+                        Some(close) => {
+                            out.push_str(&rest[..open]);
+                            out.push_str(sample);
+                            rest = &rest[open + close + 1..];
+                        }
+                        None => break,
+                    }
+                }
+                out.push_str(rest);
+                out
+            })
+            .collect::<String>()
+    };
+    SKILLS
+        .iter()
+        .flat_map(|skill| {
+            skill
+                .body
+                .split("```")
+                .skip(1)
+                .step_by(2)
+                .filter(|block| block.contains("### Requirement:"))
+                .map(|block| {
+                    // The fence's language tag is the first line; the delta
+                    // is indented to sit inside the numbered step.
+                    let body: String = block
+                        .lines()
+                        .skip(1)
+                        .map(|l| format!("{}\n", l.strip_prefix("   ").unwrap_or(l)))
+                        .collect();
+                    let capability = body
+                        .lines()
+                        .find_map(|l| l.strip_prefix("# ")?.strip_suffix(" (delta)"))
+                        .unwrap_or("definitions")
+                        .to_string();
+                    Drafted {
+                        skill: skill.name,
+                        capability,
+                        delta: filled(&body),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// `openspec` is on `PATH` in the nix devshell. A build that does not have
+/// it — the flake's own package build, whose sandbox has no network for
+/// the pinned dlx wrapper — cannot run the validator at all.
+fn openspec_missing() -> bool {
+    match std::process::Command::new("openspec")
+        .arg("--version")
+        .output()
+    {
+        Ok(out) => !out.status.success(),
+        Err(_) => true,
+    }
+}
+
+/// Writes `delta` as the one delta of a change and runs `openspec validate`
+/// over it, returning the validator's combined output and whether it
+/// reported the change valid.
+fn validate_drafted(capability: &str, delta: &str) -> (bool, String) {
+    let repo = Repo::new();
+    let change = "drafted";
+    repo.write(
+        &format!("openspec/changes/{change}/.openspec.yaml"),
+        "schema: spec-driven\ncreated: 2026-09-14\n",
+    )
+    .write(
+        &format!("openspec/changes/{change}/proposal.md"),
+        "## Why\n\nThe shape a skill instructs has to validate.\n\n## What Changes\n\n- One drafted entry.\n",
+    )
+    .write(
+        &format!("openspec/changes/{change}/tasks.md"),
+        "## 1. Draft\n\n- [ ] 1.1 Write the entry.\n",
+    )
+    .delta(change, capability, delta);
+    let out = std::process::Command::new("openspec")
+        .args(["validate", change])
+        .current_dir(repo.root())
+        .output()
+        .expect("openspec runs");
+    let text = format!("{}{}", stdout(&out), stderr(&out));
+    (out.status.success() && !text.contains("[ERROR]"), text)
+}
+
+#[test]
+fn a_skills_drafted_output_validates__drafted_term() {
+    if openspec_missing() {
+        eprintln!("skipped: openspec is not on PATH");
+        return;
+    }
+    let drafted = drafted_deltas();
+    let define = drafted
+        .iter()
+        .find(|d| d.skill == "define")
+        .unwrap_or_else(|| panic!("the define skill instructs a delta shape"));
+    assert_eq!(define.capability, "definitions");
+    let (valid, text) = validate_drafted(&define.capability, &define.delta);
+    assert!(valid, "{}\n{text}", define.delta);
+}
+
+#[test]
+fn a_skills_drafted_output_validates__instructed_shape_stops_validating() {
+    if openspec_missing() {
+        eprintln!("skipped: openspec is not on PATH");
+        return;
+    }
+    let drafted = drafted_deltas();
+    assert!(!drafted.is_empty(), "no skill instructs a delta shape");
+    for d in &drafted {
+        let (valid, text) = validate_drafted(&d.capability, &d.delta);
+        assert!(valid, "{}: {text}\n{}", d.skill, d.delta);
+        let without = d.delta.replace("A spec MUST use `ledger` to mean:\n\n", "");
+        if without != d.delta {
+            let (still, _) = validate_drafted(&d.capability, &without);
+            assert!(
+                !still,
+                "{}: the binding line is what makes the draft validate",
+                d.skill
+            );
+        }
+    }
+}
+
+/// `openspec validate` rejects every ADDED or MODIFIED requirement whose
+/// body holds no SHALL or MUST, so the term the define skill drafted could
+/// never be proposed as a change.
+#[test]
+fn bug__drafted_term_fails_validation() {
+    if openspec_missing() {
+        eprintln!("skipped: openspec is not on PATH");
+        return;
+    }
+    let body = openspec_reviewer::skills::skill("define").unwrap().body;
+    assert!(
+        body.contains("A spec MUST use `<term>` to mean:"),
+        "the skill drafts the binding line"
+    );
+    let drafted = drafted_deltas();
+    let define = drafted.iter().find(|d| d.skill == "define").unwrap();
+    let (valid, text) = validate_drafted(&define.capability, &define.delta);
+    assert!(valid, "{text}");
 }

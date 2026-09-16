@@ -256,6 +256,19 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
                 ),
             ));
         }
+        for term in glossary::unbound_terms(&glossary) {
+            findings.push(LintFinding::new(
+                Severity::Warning,
+                spec_path(&glossary.capability),
+                match term.binding.names_another() {
+                    Some(other) => format!(
+                        "term without a binding line: `{}` opens by binding `{other}`",
+                        term.name
+                    ),
+                    None => format!("term without a binding line: `{}`", term.name),
+                },
+            ));
+        }
         for r in
             glossary::recurring_undefined(&glossary, input.canon, config.definitions.min_recurrence)
         {

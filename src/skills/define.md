@@ -25,6 +25,8 @@ in a new change you name, and nothing else; it never edits
 
    ### Requirement: <term>
 
+   A spec MUST use `<term>` to mean:
+
    <one or two sentences distilled from how the requirements use it>
 
    - **Admitted:** <other words the project is content to keep saying>
@@ -35,6 +37,11 @@ in a new change you name, and nothing else; it never edits
    - **WHEN** <lifted from a real requirement>
    - **THEN** <lifted from the same requirement>
    ```
+
+   The first line is the binding line and every term has one, spelled
+   exactly that way, naming the requirement. It is what the entry
+   asserts — that this word means one thing everywhere — and without it
+   `openspec validate` rejects the term for holding no SHALL or MUST.
 
    Sort each near-synonym the uses show onto one line or the other: a
    word the project is content to keep saying is admitted, a word it

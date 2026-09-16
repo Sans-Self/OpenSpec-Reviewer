@@ -2,13 +2,16 @@
 
 ## Purpose
 
-The words this project uses, one requirement per term. The body is the
-meaning, the scenarios show the word in a sentence, and the Deprecated
-line lists the words not to use for it.
+The words this project uses, one requirement per term. The body opens
+with the binding line, the rest is the meaning, the scenarios show the
+word in a sentence, and the Deprecated line lists the words not to use
+for it. `loket` is the term written without a binding line.
 
 ## Requirements
 
 ### Requirement: group key
+
+A spec MUST use `group key` to mean:
 
 The symmetric key that wraps a workspace's document content keys for the
 current rotation. Every member holds a wrap of it; rotation replaces it.
@@ -21,6 +24,8 @@ current rotation. Every member holds a wrap of it; rotation replaces it.
 - **THEN** the group key rotates
 
 ### Requirement: manager
+
+A spec MUST use `manager` to mean:
 
 The membership role that may add and remove members and author keyring
 supersedes. The other roles are editor and viewer; there is no owner
@@ -35,6 +40,8 @@ role.
 - **THEN** the keyring head changes
 
 ### Requirement: ledger
+
+A spec MUST use `ledger` to mean:
 
 The append-only record of every keyring supersede, read to reconstruct
 who held a wrap at any rotation.

@@ -4,7 +4,7 @@ description: How to work with openspec-reviewer in a repository that has an open
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
   generatedBy: openspec-reviewer 0.1.0
-  checksum: 67a50bbdc5a52bab
+  checksum: 9aac4f2bfced0f25
 ---
 Use this skill in any repository with an `openspec/` directory and an
 `openspec-reviewer` binary. It tells you when to run the reviewer, how to
@@ -74,6 +74,9 @@ else the change touches.
 - `new_term_undefined`: the change introduces a backticked or quoted
   term twice with no glossary entry. Define it with `define`, or drop
   the backticks if it is not vocabulary.
+- `term_without_binding_line`: a glossary term whose body does not open
+  with ``A spec MUST use `<term>` to mean:``. Add the line, naming the
+  requirement; without it `openspec validate` rejects the term.
 
 ### Notes
 

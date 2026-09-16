@@ -76,6 +76,11 @@ pub enum FindingKind {
     },
     /// A glossary term no requirement outside the glossary uses.
     DefinedButUnused,
+    /// A glossary term whose body does not open with its binding line.
+    TermWithoutBindingLine {
+        /// The word the binding line names, when it names the wrong one.
+        names: Option<String>,
+    },
     /// A backticked or quoted span this change introduces and uses more
     /// than once, with no glossary entry.
     NewTermUndefined {
@@ -156,6 +161,7 @@ impl FindingKind {
                 term: "t".into(),
             },
             FindingKind::DefinedButUnused,
+            FindingKind::TermWithoutBindingLine { names: None },
             FindingKind::NewTermUndefined { term: "t".into() },
             FindingKind::TermInUse { uses: Vec::new() },
         ];
@@ -178,6 +184,7 @@ impl FindingKind {
                 | FindingKind::SiblingUsesOldName { .. }
                 | FindingKind::UsesDeprecatedSynonym { .. }
                 | FindingKind::DefinedButUnused
+                | FindingKind::TermWithoutBindingLine { .. }
                 | FindingKind::NewTermUndefined { .. }
                 | FindingKind::TermInUse { .. } => {}
             }
@@ -210,6 +217,7 @@ impl FindingKind {
             | FindingKind::SiblingUsesRemoved { .. }
             | FindingKind::SiblingUsesOldName { .. }
             | FindingKind::UsesDeprecatedSynonym { .. }
+            | FindingKind::TermWithoutBindingLine { .. }
             | FindingKind::NewTermUndefined { .. } => Severity::Warning,
             FindingKind::UnchangedModified
             | FindingKind::HistoryUnreadable { .. }
@@ -288,6 +296,12 @@ impl FindingKind {
                     "defined but unused: no requirement outside the glossary uses `{requirement}`"
                 )
             }
+            FindingKind::TermWithoutBindingLine { names } => match names {
+                Some(other) => format!(
+                    "term without a binding line: `{requirement}` opens by binding `{other}`"
+                ),
+                None => format!("term without a binding line: `{requirement}`"),
+            },
             FindingKind::NewTermUndefined { term } => {
                 format!("new term without definition: `{term}`")
             }

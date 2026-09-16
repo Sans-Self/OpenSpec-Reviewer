@@ -602,3 +602,153 @@ fn bug__citations_counted_as_terms() {
     let text = stdout(&run_in(repo.root(), &["lint"]));
     assert!(!text.contains("definition: `spec:"), "{text}");
 }
+
+#[test]
+fn a_term_opens_with_a_binding_line__meaning_excludes_the_line() {
+    let m = parse_markers(
+        "A spec MUST use `register` to mean:\n\nEvery requirement the repository asserts.\n\n- **Deprecated:** index\n",
+    );
+    assert_eq!(m.binding.as_deref(), Some("register"));
+    assert_eq!(m.meaning, "Every requirement the repository asserts.");
+    assert_eq!(m.deprecated, vec!["index"]);
+    let bare = parse_markers("A spec MUST use register to mean:\n\nThe meaning.\n");
+    assert_eq!(bare.binding.as_deref(), Some("register"));
+    assert_eq!(bare.meaning, "The meaning.");
+    let prose = parse_markers("The meaning.\n\nA spec MUST use `register` to mean: this.\n");
+    assert_eq!(prose.binding, None, "only the opening line binds");
+
+    let canon = glossary_canon();
+    let g = Glossary::build(&canon, &[], "definitions");
+    let key = g.get("group key").unwrap();
+    assert!(key.binding.is_bound());
+    assert!(!key.meaning.contains("A spec MUST use"), "{}", key.meaning);
+    let doc = review_json(&glossary_repo(), "epoch-retire");
+    let defs = doc["definitions"].as_array().unwrap();
+    assert!(
+        defs.iter()
+            .all(|d| !d["meaning"].as_str().unwrap().contains("A spec MUST use")),
+        "{defs:#?}"
+    );
+    assert!(
+        defs.iter().all(|d| d.get("binding").is_none()),
+        "the JSON glossary is unchanged: {defs:#?}"
+    );
+}
+
+#[test]
+fn a_term_opens_with_a_binding_line__no_binding_line() {
+    let repo = glossary_repo();
+    let lint = stdout(&run_in(repo.root(), &["lint"]));
+    assert!(
+        lint.contains(
+            "warning: openspec/specs/definitions/spec.md: term without a binding line: `loket`"
+        ),
+        "{lint}"
+    );
+    assert!(
+        !lint.contains("binding line: `ledger`"),
+        "the bound terms are quiet: {lint}"
+    );
+}
+
+#[test]
+fn a_term_opens_with_a_binding_line__binding_line_names_another_term() {
+    let repo = glossary_repo();
+    repo.canon(
+        "definitions",
+        &fixture("glossary", "definitions.md").replace(
+            "A spec MUST use `ledger` to mean:",
+            "A spec MUST use `snapshot` to mean:",
+        ),
+    );
+    let lint = stdout(&run_in(repo.root(), &["lint"]));
+    assert!(
+        lint.contains("term without a binding line: `ledger` opens by binding `snapshot`"),
+        "{lint}"
+    );
+}
+
+#[test]
+fn a_term_opens_with_a_binding_line__the_warning_lands_on_the_terms_pairing() {
+    let repo = glossary_repo();
+    repo.delta(
+        "epoch-retire",
+        "definitions",
+        "## ADDED Requirements\n\n### Requirement: chainParent\n\nThe head a rotation record retired.\n\n#### Scenario: In a sentence\n\n- **WHEN** x\n- **THEN** y\n",
+    );
+    let doc = review_json(&repo, "epoch-retire");
+    let fs = findings_of(&doc, "chainParent");
+    let hit = fs
+        .iter()
+        .find(|f| f["kind"] == "term_without_binding_line")
+        .unwrap_or_else(|| panic!("{fs:#?}"));
+    assert_eq!(hit["severity"], "warning");
+    assert!(
+        hit["message"].as_str().unwrap().contains("`chainParent`"),
+        "{hit:#?}"
+    );
+}
+
+#[test]
+fn a_term_opens_with_a_binding_line__editing_the_line_is_a_change_to_the_term() {
+    let repo = glossary_repo();
+    let ledger = |binding: &str| {
+        format!(
+            "## MODIFIED Requirements\n\n### Requirement: ledger\n\nA spec MUST use {binding} to mean:\n\nThe append-only record of every keyring supersede, read to reconstruct\nwho held a wrap at any rotation.\n\n- **Admitted:** log\n\n#### Scenario: In a sentence\n\n- **WHEN** a supersede lands\n- **THEN** the ledger gains an entry\n"
+        )
+    };
+    repo.delta("epoch-retire", "definitions", &ledger("`ledger`"));
+    let unchanged = findings_of(&review_json(&repo, "epoch-retire"), "ledger")
+        .iter()
+        .any(|f| f["kind"] == "unchanged_modified");
+    assert!(unchanged, "the delta is canon's text verbatim");
+
+    repo.delta("epoch-retire", "definitions", &ledger("`the ledger`"));
+    let doc = review_json(&repo, "epoch-retire");
+    let fs = findings_of(&doc, "ledger");
+    assert!(
+        fs.iter().all(|f| f["kind"] != "unchanged_modified"),
+        "editing the line is a diff: {fs:#?}"
+    );
+}
+
+#[test]
+fn a_term_opens_with_a_binding_line__panel_shows_the_meaning() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use openspec_reviewer::render::tui::{draw, App};
+    use openspec_reviewer::source::Source;
+    let repo = glossary_repo();
+    let snapshot = openspec_reviewer::source::ChangeSource {
+        root: repo.root().to_path_buf(),
+        name: "epoch-retire".into(),
+    }
+    .fetch()
+    .unwrap();
+    let review = openspec_reviewer::build::build_review(repo.root(), &snapshot).unwrap();
+    let mut app = App::new(review, Default::default());
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 60)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let screen = format!("{:?}", terminal.backend().buffer());
+    assert!(screen.contains("The symmetric key that wraps"), "{screen}");
+    assert!(!screen.contains("A spec MUST use"), "{screen}");
+}
+
+/// The five terms this change rebound, whose bodies now open with the
+/// line: `spec:definitions § canon`, `spec:definitions § snapshot`,
+/// `spec:definitions § source`, `spec:definitions § pairing` and
+/// `spec:definitions § finding`.
+#[test]
+fn a_term_opens_with_a_binding_line__this_repositorys_own_terms() {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("openspec/specs/definitions/spec.md"),
+    )
+    .unwrap();
+    let canon = canon_of("definitions", &text);
+    let glossary = Glossary::build(&canon, &[], "definitions");
+    assert_eq!(glossary.terms.len(), 5);
+    for term in &glossary.terms {
+        assert!(term.binding.is_bound(), "`{}` is unbound", term.name);
+    }
+}

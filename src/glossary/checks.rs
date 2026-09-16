@@ -115,6 +115,16 @@ pub fn unused_terms<'a>(
         .collect()
 }
 
+/// Terms whose body does not open with a binding line naming them, either
+/// because there is none or because the line names something else.
+pub fn unbound_terms(glossary: &Glossary) -> Vec<&super::Term> {
+    glossary
+        .terms
+        .iter()
+        .filter(|t| !t.binding.is_bound())
+        .collect()
+}
+
 /// A backticked or quoted span that recurs across canon with no definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recurring {
