@@ -24,8 +24,9 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// The two ways the reviewer uses an agent. `handoff` inherits the
-/// terminal; `review` captures stdout.
-pub trait Assistant {
+/// terminal; `review` captures stdout. `Send` because a batch run moves
+/// the adapter to a worker thread.
+pub trait Assistant: Send {
     fn handoff(&self, prompt: &Path) -> Result<(), AssistError>;
     fn review(&self, prompt: &Path) -> Result<String, AssistError>;
 }

@@ -1,6 +1,7 @@
 //! App state and key handling. No terminal here, so every rule about keys
 //! and rows is a unit test over an `App`.
 
+use crate::assist::{AssistError, Hint, Session};
 use crate::render::approval;
 use crate::review::normalize::text_hash;
 use crate::review::pair::{diff_versions, version_lines};
@@ -8,6 +9,7 @@ use crate::review::{inline_view, DiffLine, Pairing, Review};
 use crate::state::{ApprovalStatus, Store};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeMap;
+use std::sync::mpsc::Receiver;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
@@ -86,10 +88,43 @@ pub enum View {
     Help,
 }
 
-/// What the event loop has to do outside the app: only the editor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One pairing's place in a batch run: what to send, and where the reply
+/// belongs when it comes back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Job {
+    pub change: String,
+    pub key: String,
+    pub hash: u64,
+    pub prompt: std::path::PathBuf,
+}
+
+/// A batch run in flight. The worker sends one reply per pairing; the poll
+/// loop drains them as they arrive.
+pub struct Batch {
+    pub done: usize,
+    pub total: usize,
+    pub replies: Receiver<(Job, Result<Vec<Hint>, String>)>,
+    /// Advanced once per draw, for the spinner.
+    pub tick: usize,
+}
+
+impl Batch {
+    const SPINNER: [char; 4] = ['|', '/', '-', '\\'];
+
+    pub fn spinner(&self) -> char {
+        Batch::SPINNER[self.tick % Batch::SPINNER.len()]
+    }
+}
+
+/// What the event loop has to do outside the app: the editor, an agent
+/// session that wants the terminal, and the worker a batch run needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     EditNote,
+    /// Suspend the view and open the agent on this prompt file.
+    Handoff(std::path::PathBuf),
+    /// Run these pairings through the agent on a worker thread.
+    Batch(Vec<Job>),
 }
 
 pub struct App {
@@ -107,6 +142,12 @@ pub struct App {
     pub detail_height: u16,
     /// Pairings whose definitions panel is open, by key.
     pub definitions_open: std::collections::BTreeSet<String>,
+    /// Everything the agent needs; `None` without an `openspec/` tree the
+    /// session could read.
+    pub assist: Option<Session>,
+    pub batch: Option<Batch>,
+    /// Which hint of the current pairing `x` would dismiss.
+    pub hint_cursor: usize,
 }
 
 pub const BINDINGS: &[(&str, &str)] = &[
@@ -119,6 +160,12 @@ pub const BINDINGS: &[(&str, &str)] = &[
     ("H", "history of this requirement"),
     ("m", "cycle display mode (inline, side-by-side, raw)"),
     ("D", "definitions of the terms this requirement uses"),
+    ("i", "open the agent on this pairing, or on the change"),
+    (
+        "A",
+        "ask the agent for hints on this pairing, or on the change",
+    ),
+    ("x", "dismiss the selected hint"),
     ("PgUp / PgDn, Ctrl-u / Ctrl-d", "scroll the detail pane"),
     ("?", "this help"),
     ("q / Esc", "quit (Esc closes history first)"),
@@ -171,6 +218,221 @@ impl App {
             stores,
             detail_height: 20,
             definitions_open: std::collections::BTreeSet::new(),
+            assist: None,
+            batch: None,
+            hint_cursor: 0,
+        }
+    }
+
+    pub fn with_assist(mut self, session: Session) -> App {
+        self.assist = Some(session);
+        self
+    }
+
+    /// The change the cursor sits in, with its proposal text.
+    fn current_change(&self) -> Option<(&crate::review::ChangeReview, Option<&str>)> {
+        let index = match self.current_row()? {
+            Row::Change { change }
+            | Row::Artefact { change, .. }
+            | Row::Capability { change, .. }
+            | Row::Requirement { change, .. } => *change,
+        };
+        let change = self.review.changes.get(index)?;
+        let proposal = change
+            .artefacts
+            .iter()
+            .find(|a| a.artefact.name == "proposal.md")
+            .and_then(|a| a.artefact.after.as_deref());
+        Some((change, proposal))
+    }
+
+    /// The session, or the message saying why no agent will run. Checked
+    /// before anything is written, so a key press on an unconfigured
+    /// project costs nothing.
+    fn ready_session(&mut self) -> Option<&Session> {
+        let Some(session) = &self.assist else {
+            self.message = Some(AssistError::NotConfigured.to_string());
+            return None;
+        };
+        if let Err(e) = session.check() {
+            self.message = Some(e.to_string());
+            return None;
+        }
+        self.assist.as_ref()
+    }
+
+    /// `i`: the prompt file to open the agent on. A requirement row hands
+    /// over its pairing, any other row the whole change.
+    fn handoff(&mut self) -> Option<Effect> {
+        self.ready_session()?;
+        let session = self.assist.as_ref()?;
+        let written = match self.current_pairing() {
+            Some(p) => session.write_pairing_prompt(p, false),
+            None => {
+                let (change, proposal) = self.current_change()?;
+                let pairings: Vec<&Pairing> = change.pairings().collect();
+                session.write_change_prompt(&change.name, proposal, &pairings, false)
+            }
+        };
+        match written {
+            Ok(path) => Some(Effect::Handoff(path)),
+            Err(e) => {
+                self.message = Some(e.to_string());
+                None
+            }
+        }
+    }
+
+    /// `A`: the pairings a batch run covers, each with its prompt written.
+    /// A requirement row runs its own pairing, any other row every pairing
+    /// of the change.
+    fn start_batch(&mut self) -> Option<Effect> {
+        if self.batch.is_some() {
+            self.message = Some("a batch run is already going".to_string());
+            return None;
+        }
+        self.ready_session()?;
+        let session = self.assist.as_ref()?;
+        let targets: Vec<&Pairing> = match self.current_pairing() {
+            Some(p) => vec![p],
+            None => self.current_change()?.0.pairings().collect(),
+        };
+        let mut jobs = Vec::new();
+        for p in targets {
+            match session.write_pairing_prompt(p, true) {
+                Ok(prompt) => jobs.push(Job {
+                    change: p.change.clone(),
+                    key: p.key(),
+                    hash: p.text_hash(),
+                    prompt,
+                }),
+                Err(e) => {
+                    self.message = Some(e.to_string());
+                    return None;
+                }
+            }
+        }
+        if jobs.is_empty() {
+            self.message = Some("nothing to review here".to_string());
+            return None;
+        }
+        Some(Effect::Batch(jobs))
+    }
+
+    /// Hand the worker's channel to the app, which drains it as it draws.
+    pub fn batch_started(
+        &mut self,
+        total: usize,
+        replies: Receiver<(Job, Result<Vec<Hint>, String>)>,
+    ) {
+        self.batch = Some(Batch {
+            done: 0,
+            total,
+            replies,
+            tick: 0,
+        });
+    }
+
+    /// Every reply that has arrived since the last draw, stored and shown.
+    /// A pairing whose text changed while the agent was reading keeps the
+    /// hints under the hash they were made for; the cache drops them on
+    /// the next run.
+    pub fn poll_batch(&mut self) {
+        let Some(batch) = &mut self.batch else {
+            return;
+        };
+        batch.tick += 1;
+        let mut arrived = Vec::new();
+        while let Ok(reply) = batch.replies.try_recv() {
+            arrived.push(reply);
+        }
+        let disconnected = matches!(
+            batch.replies.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected)
+        );
+        batch.done += arrived.len();
+        let finished = batch.done >= batch.total || (arrived.is_empty() && disconnected);
+        for (job, result) in arrived {
+            match result {
+                Ok(hints) => self.store_hints(&job, hints),
+                Err(e) => self.message = Some(e),
+            }
+        }
+        if finished {
+            self.batch = None;
+        }
+        self.review.recount();
+    }
+
+    fn store_hints(&mut self, job: &Job, hints: Vec<Hint>) {
+        let stored = self
+            .store_for(&job.change)
+            .set_hints(&job.key, job.hash, hints);
+        match stored {
+            Ok(state) => {
+                let shown = state.hints_for(job.hash);
+                if let Some(p) = self
+                    .review
+                    .pairings_mut()
+                    .find(|p| p.change == job.change && p.key() == job.key)
+                {
+                    p.state = state;
+                    p.hints = shown;
+                }
+            }
+            Err(e) => self.message = Some(e.to_string()),
+        }
+    }
+
+    /// Whether `j` and `k` move between hints rather than scroll: only in
+    /// the detail pane, and only when there is more than nothing to move
+    /// between. Without hints the pane scrolls as it always did.
+    fn hints_selectable(&self) -> bool {
+        self.focus == Pane::Detail && !self.current_hints().is_empty()
+    }
+
+    fn move_hint_cursor(&mut self, forward: bool) {
+        let last = self.current_hints().len().saturating_sub(1);
+        self.hint_cursor = if forward {
+            (self.hint_cursor + 1).min(last)
+        } else {
+            self.hint_cursor.saturating_sub(1)
+        };
+    }
+
+    /// The hints `x` can reach: the current pairing's, undismissed.
+    pub fn current_hints(&self) -> Vec<Hint> {
+        self.current_pairing()
+            .map(|p| p.visible_hints().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// `x`: dismiss the selected hint. It stays dismissed when a later run
+    /// returns the same kind and message.
+    fn dismiss_hint(&mut self) {
+        let hints = self.current_hints();
+        let Some(hint) = hints.get(self.hint_cursor.min(hints.len().saturating_sub(1))) else {
+            return;
+        };
+        let Some((change, key)) = self.current_pairing().map(|p| (p.change.clone(), p.key()))
+        else {
+            return;
+        };
+        let hash = self.current_pairing().map(Pairing::text_hash).unwrap_or(0);
+        let dismissed = self
+            .store_for(&change)
+            .dismiss_hint(&key, hint.kind, &hint.message);
+        match dismissed {
+            Ok(state) => {
+                let shown = state.hints_for(hash);
+                if let Some(p) = self.current_pairing_mut() {
+                    p.state = state;
+                    p.hints = shown;
+                }
+                self.hint_cursor = 0;
+                self.review.recount();
+            }
+            Err(e) => self.message = Some(e.to_string()),
         }
     }
 
@@ -311,6 +573,7 @@ impl App {
         if self.rows[i].selectable() {
             self.cursor = i;
             self.scroll = 0;
+            self.hint_cursor = 0;
         }
     }
 
@@ -329,6 +592,7 @@ impl App {
             if has_finding(self, i) {
                 self.cursor = i;
                 self.scroll = 0;
+                self.hint_cursor = 0;
                 return;
             }
         }
@@ -473,17 +737,21 @@ impl App {
                 self.quit = true
             }
             (KeyCode::Char('j'), false) | (KeyCode::Down, false) => {
-                if self.focus == Pane::Detail {
-                    self.scroll_by(1);
-                } else {
+                if self.focus != Pane::Detail {
                     self.move_cursor(true);
+                } else if self.hints_selectable() {
+                    self.move_hint_cursor(true);
+                } else {
+                    self.scroll_by(1);
                 }
             }
             (KeyCode::Char('k'), false) | (KeyCode::Up, false) => {
-                if self.focus == Pane::Detail {
-                    self.scroll_by(-1);
-                } else {
+                if self.focus != Pane::Detail {
                     self.move_cursor(false);
+                } else if self.hints_selectable() {
+                    self.move_hint_cursor(false);
+                } else {
+                    self.scroll_by(-1);
                 }
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => {
@@ -500,6 +768,9 @@ impl App {
                     return Some(Effect::EditNote);
                 }
             }
+            (KeyCode::Char('i'), false) => return self.handoff(),
+            (KeyCode::Char('A'), false) => return self.start_batch(),
+            (KeyCode::Char('x'), false) => self.dismiss_hint(),
             (KeyCode::Char('H'), false) => self.open_history(),
             (KeyCode::Char('m'), false) => self.mode = self.mode.next(),
             (KeyCode::Char('D'), false) => self.toggle_definitions(),

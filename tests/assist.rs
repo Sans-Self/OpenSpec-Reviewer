@@ -6,9 +6,11 @@
 mod common;
 
 use common::*;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use openspec_reviewer::assist::{
     assistant, files, parse_hints, Agent, Assist, AssistError, Hint, HintKind, Session,
 };
+use openspec_reviewer::render::tui::{App, Effect, Pane};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -555,4 +557,505 @@ fn prompt_templates_ship_and_can_be_overridden__the_prompts_subcommand() {
     assert!(stdout(&first).contains("wrote openspec/reviewer/prompts/pairing.md"));
     let again = run_in(repo.root(), &["assist", "prompts"]);
     assert!(stdout(&again).contains("kept  openspec/reviewer/prompts/pairing.md"));
+}
+
+fn built_of(repo: &Repo, change: &str) -> openspec_reviewer::build::Built {
+    let source = openspec_reviewer::source::ChangeSource {
+        root: repo.root().into(),
+        name: change.into(),
+    };
+    let snapshot = openspec_reviewer::source::Source::fetch(&source).expect("the change reads");
+    let review =
+        openspec_reviewer::build::build_review(repo.root(), &snapshot).expect("the review builds");
+    openspec_reviewer::build::attach_state(repo.root(), review, Some(&repo.state_home()))
+        .expect("state attaches")
+}
+
+/// An app on the fixture change whose agent is the given fake CLI.
+fn assist_app(repo: &Repo, fake: &FakePath, agent: Agent) -> App {
+    let built = built_of(repo, "epoch-retire");
+    let mut session = Session::open(repo.root(), repo.state_home().join("prompts"))
+        .with_glossary(built.review.glossary.clone());
+    session.assist = Some(assist(agent));
+    session.search_path = Some(fake.path());
+    App::new(built.review, built.stores).with_assist(session)
+}
+
+fn press(app: &mut App, c: char) -> Option<Effect> {
+    app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+}
+
+fn row_of_requirement(app: &App, name: &str) -> usize {
+    app.rows
+        .iter()
+        .position(|row| app.pairing_at(row).is_some_and(|p| p.name == name))
+        .unwrap_or_else(|| panic!("no row for {name}"))
+}
+
+#[test]
+fn handoff_opens_the_agent_on_the_current_pairing__open_and_return() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-echo.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    let cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    app.cursor = cursor;
+
+    let effect = press(&mut app, 'i').expect("the handoff is an effect");
+    let Effect::Handoff(prompt) = effect else {
+        panic!("expected a handoff, got {effect:?}");
+    };
+    let written = std::fs::read_to_string(&prompt).expect("the prompt file is written");
+    assert!(written.contains("Rotation produces a new epoch key"));
+    assert_eq!(app.cursor, cursor, "the same row is selected");
+    assert_eq!(app.message, None);
+
+    let agent = app.assist.as_ref().unwrap().assistant().expect("adapter");
+    agent.handoff(&prompt).expect("the session exits");
+    assert!(fake.argv().join("\n").contains("Rotation produces a new"));
+}
+
+#[test]
+fn handoff_opens_the_agent_on_the_current_pairing__handoff_on_the_change() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-echo.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = app
+        .rows
+        .iter()
+        .position(|row| app.artefact_at(row).is_some())
+        .expect("a proposal row");
+
+    let effect = press(&mut app, 'i').expect("the handoff is an effect");
+    let Effect::Handoff(prompt) = effect else {
+        panic!("expected a handoff, got {effect:?}");
+    };
+    let written = std::fs::read_to_string(&prompt).expect("the prompt file is written");
+    assert!(written.contains("## Proposal"));
+    assert!(written.contains("Retire the epoch."));
+    assert!(written.contains("§ Rotation produces a new epoch key"));
+}
+
+#[test]
+fn the_agent_is_chosen_in_configuration__no_process_is_started() {
+    let repo = prompt_repo();
+    let built = built_of(&repo, "epoch-retire");
+    let session = Session::open(repo.root(), repo.state_home().join("prompts"));
+    assert!(session.assist.is_none(), "no [assist] in reviewer.toml");
+    let mut app = App::new(built.review, built.stores).with_assist(session);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+
+    assert_eq!(press(&mut app, 'i'), None, "no effect, so nothing runs");
+    assert_eq!(
+        app.message.as_deref(),
+        Some("assist is not configured; add an [assist] section to openspec/reviewer.toml")
+    );
+    assert_eq!(press(&mut app, 'A'), None);
+    assert!(app.message.is_some());
+    assert!(
+        !repo.state_home().join("prompts").exists(),
+        "not even a prompt file is written"
+    );
+}
+
+#[test]
+fn the_agent_is_chosen_in_configuration__the_view_says_the_binary_is_missing() {
+    let repo = prompt_repo();
+    let empty = tempfile::tempdir().unwrap();
+    let built = built_of(&repo, "epoch-retire");
+    let mut session = Session::open(repo.root(), repo.state_home().join("prompts"));
+    session.assist = Some(assist(Agent::Codex));
+    session.search_path = Some(empty.path().as_os_str().to_os_string());
+    let mut app = App::new(built.review, built.stores).with_assist(session);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    assert_eq!(press(&mut app, 'i'), None);
+    assert_eq!(
+        app.message.as_deref(),
+        Some("the `codex` CLI was not found")
+    );
+}
+
+/// What the event loop's worker does, run on this thread so the test is
+/// deterministic: every job through the agent, every reply back to the app.
+fn run_batch(app: &mut App, jobs: Vec<openspec_reviewer::render::tui::Job>) {
+    let agent = app.assist.as_ref().unwrap().assistant().expect("adapter");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let total = jobs.len();
+    for job in jobs {
+        let reply = agent
+            .review(&job.prompt)
+            .map(|text| parse_hints(&text))
+            .map_err(|e| e.to_string());
+        tx.send((job, reply)).unwrap();
+    }
+    drop(tx);
+    app.batch_started(total, rx);
+    app.poll_batch();
+}
+
+#[test]
+fn batch_review_turns_the_agents_reply_into_hints() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    assert_eq!(jobs.len(), 1, "one pairing, one job");
+    run_batch(&mut app, jobs);
+
+    let p = app.current_pairing().expect("the pairing");
+    let hints: Vec<_> = p.visible_hints().collect();
+    assert_eq!(hints.len(), 2);
+    assert_eq!(hints[0].kind, HintKind::CompoundCondition);
+    assert_eq!(hints[1].kind, HintKind::UncoveredMust);
+    assert!(app.batch.is_none(), "the run is over");
+}
+
+#[test]
+fn batch_review_turns_the_agents_reply_into_hints__every_pairing_of_the_change() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = app
+        .rows
+        .iter()
+        .position(|row| app.artefact_at(row).is_some())
+        .expect("a proposal row");
+    let pairings = app.review.pairings().count();
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    assert_eq!(jobs.len(), pairings);
+    run_batch(&mut app, jobs);
+    assert_eq!(app.review.summary.hints, pairings * 2);
+}
+
+#[test]
+fn batch_review_turns_the_agents_reply_into_hints__agent_exits_non_zero_in_the_view() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-fails.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    run_batch(&mut app, jobs);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not logged in"),
+        "the status line shows the agent's stderr: {:?}",
+        app.message
+    );
+    assert!(
+        app.current_pairing().expect("pairing").hints.is_empty(),
+        "no hint is attached"
+    );
+}
+
+#[test]
+fn hints_are_a_severity_that_never_affects_the_exit_status() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    run_batch(&mut app, jobs);
+
+    let before = app.review.summary.exit_code();
+    assert_eq!(
+        openspec_reviewer::review::Summary {
+            errors: 0,
+            warnings: 0,
+            notes: 0,
+            hints: 4,
+        }
+        .exit_code(),
+        0,
+        "hints alone are exit status 0"
+    );
+    assert!(app.review.summary.hints > 0);
+    assert_eq!(
+        before,
+        openspec_reviewer::review::Summary {
+            hints: 0,
+            ..app.review.summary
+        }
+        .exit_code(),
+        "the hints changed nothing"
+    );
+
+    let row = &app.rows[app.cursor];
+    let p = app.pairing_at(row).unwrap();
+    assert_eq!(openspec_reviewer::render::hint_marker(p), "✦");
+    let text = openspec_reviewer::render::text::render(
+        &app.review,
+        openspec_reviewer::render::text::TextOptions {
+            colour: false,
+            findings_only: false,
+            hints: false,
+        },
+    );
+    assert!(text.contains("hint: compound_condition:"));
+    assert!(text.contains("✦"));
+}
+
+#[test]
+fn hints_are_a_severity_that_never_affects_the_exit_status__only_hints() {
+    let repo = Repo::new();
+    repo.canon("alpha", ALPHA_CANON)
+        .write("openspec/reviewer.toml", &custom_agent_toml(VALID_REPLY))
+        .delta("clean", "alpha", CLEAN_DELTA);
+    let out = run_in(repo.root(), &["--plain", "--assist", "change", "clean"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(stdout(&out).contains("hint: term_misuse:"));
+}
+
+#[test]
+fn hints_are_a_severity_that_never_affects_the_exit_status__findings_only() {
+    let repo = prompt_repo();
+    repo.write("openspec/reviewer.toml", &custom_agent_toml(VALID_REPLY));
+    let bare = run_in(
+        repo.root(),
+        &["--findings-only", "--assist", "change", "epoch-retire"],
+    );
+    assert!(bare.status.success() || bare.status.code() == Some(1));
+    assert!(
+        stdout(&bare).contains("warning"),
+        "the warning is there: {}",
+        stdout(&bare)
+    );
+    assert!(
+        !stdout(&bare).contains("term_misuse"),
+        "no hint without --hints"
+    );
+    let with = run_in(
+        repo.root(),
+        &[
+            "--findings-only",
+            "--hints",
+            "--assist",
+            "change",
+            "epoch-retire",
+        ],
+    );
+    assert!(stdout(&with).contains("hint"));
+    assert!(stdout(&with).contains("term_misuse"));
+}
+
+const VALID_REPLY: &str =
+    r#"[{\"kind\":\"term_misuse\",\"message\":\"manager is used where admin is meant\"}]"#;
+
+const CLEAN_DELTA: &str = "\
+## MODIFIED Requirements
+
+### Requirement: Index rows are ordered by path
+
+Rows MUST be ordered alphabetically by path, orphans last.
+
+#### Scenario: Paths sort alphabetically
+
+- **WHEN** the index renders routes
+- **THEN** the rows appear in path order
+";
+
+/// A `reviewer.toml` whose agent is a shell command printing `reply`, and
+/// counting its calls in `calls` next to the repository.
+fn custom_agent_toml(reply: &str) -> String {
+    format!(
+        "[assist]\nagent = \"custom\"\nreview_command = \"echo x >> calls; printf '{reply}'\"\n"
+    )
+}
+
+#[test]
+fn batch_review_is_available_without_the_view__agent_driven_review() {
+    let repo = prompt_repo();
+    repo.write("openspec/reviewer.toml", &custom_agent_toml(VALID_REPLY));
+    let out = run_in(
+        repo.root(),
+        &["--format", "json", "--assist", "change", "epoch-retire"],
+    );
+    assert!(out.status.success() || out.status.code() == Some(1));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid JSON");
+    let pairings = json["changes"][0]["capabilities"][0]["pairings"]
+        .as_array()
+        .expect("pairings");
+    for p in pairings {
+        assert_eq!(
+            p["hints"][0]["kind"], "term_misuse",
+            "every pairing has a hints array"
+        );
+    }
+    let calls = |repo: &Repo| {
+        std::fs::read_to_string(repo.root().join("calls"))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let first = calls(&repo);
+    assert_eq!(first, pairings.len(), "one call per pairing");
+
+    let again = run_in(
+        repo.root(),
+        &["--format", "json", "--assist", "change", "epoch-retire"],
+    );
+    assert!(again.status.success() || again.status.code() == Some(1));
+    assert_eq!(
+        calls(&repo),
+        first,
+        "the agent ran only for pairings without a valid cache"
+    );
+}
+
+#[test]
+fn batch_review_is_available_without_the_view__no_flag_no_agent() {
+    let repo = prompt_repo();
+    repo.write("openspec/reviewer.toml", &custom_agent_toml(VALID_REPLY));
+    let out = run_in(repo.root(), &["--plain", "change", "epoch-retire"]);
+    assert!(
+        !repo.root().join("calls").exists(),
+        "plain output never runs an agent by itself"
+    );
+    assert!(!stdout(&out).contains("hint:"));
+}
+
+#[test]
+fn hints_are_cached_by_the_text_they_were_made_for__text_unchanged() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    run_batch(&mut app, jobs);
+    drop(app);
+
+    let built = built_of(&repo, "epoch-retire");
+    let p = built
+        .review
+        .pairings()
+        .find(|p| p.name == "Rotation produces a new epoch key")
+        .expect("the pairing");
+    assert_eq!(
+        p.visible_hints().count(),
+        2,
+        "the two hints show without running the agent"
+    );
+}
+
+#[test]
+fn hints_are_cached_by_the_text_they_were_made_for__text_changed() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    run_batch(&mut app, jobs);
+    drop(app);
+
+    repo.append(
+        "openspec/changes/epoch-retire/specs/key-rotation/spec.md",
+        "\nOne more sentence changes the text.\n",
+    );
+    let built = built_of(&repo, "epoch-retire");
+    let p = built
+        .review
+        .pairings()
+        .find(|p| p.name == "Rotation produces a new epoch key")
+        .expect("the pairing");
+    assert_eq!(p.hints.len(), 0, "the pairing shows no hints");
+}
+
+#[test]
+fn a_hint_can_be_dismissed__dismiss() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    run_batch(&mut app, jobs);
+
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(app.focus, Pane::Detail);
+    press(&mut app, 'j');
+    assert_eq!(app.hint_cursor, 1, "j moves between hints in the pane");
+    press(&mut app, 'k');
+    assert_eq!(app.hint_cursor, 0);
+
+    press(&mut app, 'x');
+    let p = app.current_pairing().expect("the pairing");
+    assert_eq!(p.visible_hints().count(), 1, "the hint leaves the pane");
+    assert_eq!(openspec_reviewer::render::hint_marker(p), "✦");
+
+    press(&mut app, 'x');
+    let p = app.current_pairing().expect("the pairing");
+    assert_eq!(p.visible_hints().count(), 0);
+    assert_eq!(
+        openspec_reviewer::render::hint_marker(p),
+        "",
+        "the row's ✦ goes when no hint remains"
+    );
+    let json = openspec_reviewer::render::json::render(&app.review);
+    assert!(
+        json.contains("\"dismissed\": true"),
+        "JSON keeps them, flagged"
+    );
+}
+
+#[test]
+fn a_hint_can_be_dismissed__same_hint_returns() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    run_batch(&mut app, jobs.clone());
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    press(&mut app, 'x');
+    assert_eq!(app.current_pairing().unwrap().visible_hints().count(), 1);
+
+    run_batch(&mut app, jobs);
+    let p = app.current_pairing().expect("the pairing");
+    assert_eq!(
+        p.visible_hints().count(),
+        1,
+        "the dismissed hint stays hidden after a re-run"
+    );
+    assert_eq!(p.hints.len(), 2, "both are stored, one dismissed");
+}
+
+#[test]
+fn a_hint_can_be_dismissed__plain_text_hides_it() {
+    let repo = prompt_repo();
+    let fake = FakePath::with("claude", "agent-valid.sh");
+    let mut app = assist_app(&repo, &fake, Agent::Claude);
+    app.cursor = row_of_requirement(&app, "Rotation produces a new epoch key");
+    let Some(Effect::Batch(jobs)) = press(&mut app, 'A') else {
+        panic!("expected a batch run");
+    };
+    run_batch(&mut app, jobs);
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    press(&mut app, 'x');
+    let text = openspec_reviewer::render::text::render(
+        &app.review,
+        openspec_reviewer::render::text::TextOptions {
+            colour: false,
+            findings_only: false,
+            hints: false,
+        },
+    );
+    assert!(!text.contains("compound_condition"), "hidden in plain text");
+    assert!(text.contains("uncovered_must"), "the other one is there");
 }

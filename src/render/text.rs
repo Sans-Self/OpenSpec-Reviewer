@@ -9,6 +9,8 @@ use std::fmt::Write;
 pub struct TextOptions {
     pub colour: bool,
     pub findings_only: bool,
+    /// Hints in --findings-only output: off unless --hints asks for them.
+    pub hints: bool,
 }
 
 fn paint(colour: bool, code: &str, text: &str) -> String {
@@ -54,8 +56,9 @@ fn severity_code(s: Severity) -> &'static str {
 fn write_pairing(out: &mut String, p: &Pairing, colour: bool) {
     let mark = approval(p).mark();
     let markers = format!(
-        "{}{}",
+        "{}{}{}",
         super::finding_marker(p),
+        super::hint_marker(p),
         super::note_marker(p.state.note.is_some())
     );
     let heading = format!("{mark} {} {}", p.kind.glyph(), p.name);
@@ -92,6 +95,21 @@ fn write_pairing(out: &mut String, p: &Pairing, colour: bool) {
             let _ = writeln!(out, "        {d}");
         }
     }
+    for h in p.visible_hints() {
+        let _ = writeln!(
+            out,
+            "    {}: {}: {}",
+            paint(colour, severity_code(Severity::Hint), "hint"),
+            h.kind,
+            h.message
+        );
+        if let Some(scenario) = &h.scenario {
+            let _ = writeln!(out, "        in scenario: {scenario}");
+        }
+        if let Some(quote) = &h.quote {
+            let _ = writeln!(out, "        {quote}");
+        }
+    }
     if let Some(note) = &p.state.note {
         for (i, l) in note.lines().enumerate() {
             let _ = writeln!(
@@ -109,7 +127,7 @@ pub fn render(review: &Review, options: TextOptions) -> String {
     let colour = options.colour;
     let mut out = String::new();
     if options.findings_only {
-        return render_findings_only(review);
+        return render_findings_only(review, options.hints);
     }
     for change in &review.changes {
         let _ = writeln!(
@@ -181,11 +199,24 @@ fn write_notices(out: &mut String, review: &Review, colour: bool) {
 }
 
 /// One line per finding: `severity  change/capability/requirement: message`.
-pub fn render_findings_only(review: &Review) -> String {
+pub fn render_findings_only(review: &Review, hints: bool) -> String {
     let mut out = String::new();
     for p in review.pairings() {
         for f in &p.findings {
             let _ = writeln!(out, "{:<7}  {}: {}", f.severity, f.location, f.message);
+        }
+        if !hints {
+            continue;
+        }
+        for h in p.visible_hints() {
+            let _ = writeln!(
+                out,
+                "{:<7}  {}: {}: {}",
+                Severity::Hint,
+                p.location(),
+                h.kind,
+                h.message
+            );
         }
     }
     for n in &review.notices {

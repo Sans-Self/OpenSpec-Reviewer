@@ -3,7 +3,7 @@
 mod app;
 mod ui;
 
-pub use app::{App, DetailMode, Effect, HistoryMode, Pane, Row, View, BINDINGS};
+pub use app::{App, Batch, DetailMode, Effect, HistoryMode, Job, Pane, Row, View, BINDINGS};
 pub use ui::{draw, status_text, styled_line};
 
 use crate::review::Review;
@@ -29,8 +29,15 @@ fn install_signal_flag() -> io::Result<Arc<AtomicBool>> {
 
 /// Run the view until the user quits. `ratatui::init` installs a panic
 /// hook that restores the terminal before the message prints.
-pub fn run(review: Review, stores: BTreeMap<String, Store>) -> io::Result<()> {
+pub fn run(
+    review: Review,
+    stores: BTreeMap<String, Store>,
+    assist: Option<crate::assist::Session>,
+) -> io::Result<()> {
     let mut app = App::new(review, stores);
+    if let Some(session) = assist {
+        app = app.with_assist(session);
+    }
     let interrupted = install_signal_flag()?;
     let mut terminal = ratatui::try_init()?;
     let result = event_loop(&mut terminal, &mut app, &interrupted);
@@ -44,21 +51,77 @@ fn event_loop(
     interrupted: &AtomicBool,
 ) -> io::Result<()> {
     while !app.quit && !interrupted.load(Ordering::Relaxed) {
+        app.poll_batch();
         terminal.draw(|f| ui::draw(f, app))?;
-        if !event::poll(Duration::from_millis(250))? {
+        // Short while an agent is working, so the spinner turns and replies
+        // land as they arrive; a quarter second otherwise.
+        let wait = if app.batch.is_some() { 100 } else { 250 };
+        if !event::poll(Duration::from_millis(wait))? {
             continue;
         }
         match event::read()? {
-            Event::Key(key) if key.kind != KeyEventKind::Release => {
-                if let Some(app::Effect::EditNote) = app.handle_key(key) {
-                    edit_note_suspended(terminal, app)?;
-                }
-            }
+            Event::Key(key) if key.kind != KeyEventKind::Release => match app.handle_key(key) {
+                Some(app::Effect::EditNote) => edit_note_suspended(terminal, app)?,
+                Some(app::Effect::Handoff(prompt)) => handoff_suspended(terminal, app, &prompt)?,
+                Some(app::Effect::Batch(jobs)) => start_worker(app, jobs),
+                None => {}
+            },
             Event::Resize(_, _) => {}
             _ => {}
         }
     }
     Ok(())
+}
+
+/// Leave the alternate screen, hand the terminal to the agent, come back
+/// with the same row selected: the cursor is never touched.
+fn handoff_suspended(
+    terminal: &mut ratatui::DefaultTerminal,
+    app: &mut App,
+    prompt: &std::path::Path,
+) -> io::Result<()> {
+    let agent = match app.assist.as_ref() {
+        Some(session) => session.assistant(),
+        None => Err(crate::assist::AssistError::NotConfigured),
+    };
+    ratatui::restore();
+    let result = agent.and_then(|agent| agent.handoff(prompt));
+    *terminal = ratatui::try_init()?;
+    terminal.clear()?;
+    if let Err(e) = result {
+        app.message = Some(e.to_string());
+    }
+    Ok(())
+}
+
+/// One thread, one pairing at a time: the agent CLI is the bottleneck, and
+/// parallel calls multiply the reviewer's bill.
+fn start_worker(app: &mut App, jobs: Vec<app::Job>) {
+    let agent = match app.assist.as_ref().map(|s| s.assistant()) {
+        Some(Ok(agent)) => agent,
+        Some(Err(e)) => {
+            app.message = Some(e.to_string());
+            return;
+        }
+        None => {
+            app.message = Some(crate::assist::AssistError::NotConfigured.to_string());
+            return;
+        }
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let total = jobs.len();
+    std::thread::spawn(move || {
+        for job in jobs {
+            let reply = agent
+                .review(&job.prompt)
+                .map(|text| crate::assist::parse_hints(&text))
+                .map_err(|e| e.to_string());
+            if tx.send((job, reply)).is_err() {
+                return;
+            }
+        }
+    });
+    app.batch_started(total, rx);
 }
 
 /// Leave the alternate screen, run the editor, come back.

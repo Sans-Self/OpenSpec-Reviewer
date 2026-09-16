@@ -99,6 +99,7 @@ fn history_comes_from_archived_changes__never_touched() {
         text::TextOptions {
             colour: false,
             findings_only: false,
+            hints: false,
         },
     );
     assert!(plain.contains("history: none"));
@@ -216,6 +217,7 @@ fn history_is_available_in_plain_output() {
         text::TextOptions {
             colour: false,
             findings_only: false,
+            hints: false,
         },
     );
     assert!(
