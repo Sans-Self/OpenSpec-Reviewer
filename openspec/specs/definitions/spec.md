@@ -9,9 +9,7 @@ scenarios show it in a sentence, and a `- **Deprecated:**` line lists the
 words not to use for it. The reviewer reads this file as the glossary: it finds defined terms
 and their synonyms anywhere in prose, and proposes new terms only from
 what specs already mark with backticks or double quotes.
-
 ## Requirements
-
 ### Requirement: canon
 
 A spec MUST use `canon` to mean:
@@ -83,3 +81,4 @@ error, warning or note. Errors set the exit status to 2, warnings to 1.
 
 - **WHEN** a MODIFIED requirement has no canon counterpart
 - **THEN** the pairing carries an error finding
+
