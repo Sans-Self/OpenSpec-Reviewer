@@ -25,7 +25,7 @@ to date or edited.
 - **AND** no reviewer skills installed
 - **WHEN** the user runs `openspec-reviewer skills install`
 - **THEN** `.claude/skills/opsx-reviewer-workflow/SKILL.md` exists
-- **AND** four more skills exist beside it
+- **AND** five more skills exist beside it
 - **AND** no `.agents/` directory exists
 - **AND** stdout names the files written
 
@@ -52,18 +52,18 @@ to date or edited.
 
 ### Requirement: User-callable skills get a command alias
 
-For each of `define`, `cite`, `crossref` and `triage`, install MUST
-write `.claude/commands/opsx-reviewer/<name>.md` whose body instructs
-the agent to load the `opsx-reviewer-<name>` skill and pass the
-command's arguments to it. The command file MUST carry the same version
-and checksum frontmatter as a skill and follow the same overwrite rule.
-No command MUST be written for `workflow`.
+For each of `define`, `discover`, `cite`, `crossref` and `triage`,
+install MUST write `.claude/commands/opsx-reviewer/<name>.md` whose body
+instructs the agent to load the `opsx-reviewer-<name>` skill and pass
+the command's arguments to it. The command file MUST carry the same
+version and checksum frontmatter as a skill and follow the same
+overwrite rule. No command MUST be written for `workflow`.
 
-#### Scenario: Four commands, not five
+#### Scenario: Five commands, not six
 
 - **GIVEN** a repository with a `.claude/` directory
 - **WHEN** the user runs `openspec-reviewer skills install`
-- **THEN** `.claude/commands/opsx-reviewer/` holds `define.md`, `cite.md`, `crossref.md` and `triage.md`
+- **THEN** `.claude/commands/opsx-reviewer/` holds `define.md`, `discover.md`, `cite.md`, `crossref.md` and `triage.md`
 - **AND** holds no `workflow.md`
 
 #### Scenario: Command defers to the skill
@@ -151,7 +151,7 @@ name the skill that does for each kind of edit.
 
 #### Scenario: Shape of every task skill
 
-- **WHEN** the shipped `define`, `cite`, `crossref` and `triage` skills are read
+- **WHEN** the shipped `define`, `discover`, `cite`, `crossref` and `triage` skills are read
 - **THEN** each first paragraph names `openspec/changes/` or test files as its output
 - **AND** each names `openspec/specs/` as out of bounds
 - **AND** each ends with an `openspec-reviewer` command
@@ -322,3 +322,36 @@ test.
 - **WHEN** the test runs
 - **THEN** it fails naming that skill
 
+### Requirement: The discover skill finds the vocabulary the spans miss
+
+`/opsx-reviewer:discover` MUST instruct the agent to read every
+requirement name and body under `openspec/specs/`, collect the noun
+phrases of one to three words that appear in two or more capabilities,
+drop every phrase the glossary already names as a term or a synonym,
+merge the rest with the lint's "recurring term without definition"
+notes, and hand the merged list to `define` as candidates with the
+`capability § requirement` uses of each. The skill MUST tell the agent
+to drop a phrase found in one capability only, to ask for a batch size
+before handing off, and MUST end by running `openspec-reviewer change
+<name>` on the change `define` wrote.
+
+#### Scenario: Prose term in three capabilities
+
+- **GIVEN** canon where three capabilities say "chain head" in plain prose
+- **AND** no span check note names it
+- **WHEN** the agent follows the skill
+- **THEN** `chain head` is a candidate handed to `define`
+- **AND** its uses list the three requirements
+
+#### Scenario: Phrase in one capability only
+
+- **GIVEN** canon where one capability says "retry budget" in four requirements
+- **WHEN** the agent follows the skill
+- **THEN** `retry budget` is not a candidate
+
+#### Scenario: Phrase the glossary knows
+
+- **GIVEN** a glossary term `ledger` with an admitted synonym `log`
+- **AND** canon that says "log" in two capabilities
+- **WHEN** the agent follows the skill
+- **THEN** `log` is not a candidate
