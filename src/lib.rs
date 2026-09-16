@@ -1,9 +1,11 @@
 //! Review OpenSpec changes as the semantic diff they are.
 //!
-//! The domain modules (`model`, `review`, `state`, `citations`, `drift`, `skills`) take values in and return
-//! values out. Everything that touches the filesystem, git, gh or the
-//! terminal lives under `source` and `render`.
+//! The domain modules (`model`, `review`, `state`, `citations`, `drift`,
+//! `glossary`, `skills`, `assist`) take values in and return values out.
+//! Everything that touches the filesystem, git, gh or the terminal lives
+//! under `source` and `render`.
 
+pub mod assist;
 pub mod build;
 pub mod citations;
 pub mod drift;

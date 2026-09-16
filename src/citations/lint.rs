@@ -306,6 +306,7 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
             Severity::Error => s.errors += 1,
             Severity::Warning => s.warnings += 1,
             Severity::Note => s.notes += 1,
+            Severity::Hint => s.hints += 1,
         }
         s
     });

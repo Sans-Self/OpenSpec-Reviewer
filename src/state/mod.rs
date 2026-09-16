@@ -5,6 +5,7 @@ mod time;
 
 pub use editor::{edit_note, edit_note_with};
 
+use crate::assist::{Hint, HintKind};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -17,12 +18,34 @@ pub struct Approval {
     pub at: String,
 }
 
+/// An agent's hints and the text they were made for. The hash is the same
+/// normalized-after-text hash an approval carries, so one hash function
+/// serves both.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hints {
+    pub text_hash: u64,
+    #[serde(default)]
+    pub items: Vec<Hint>,
+}
+
+/// A hint the reviewer said no to, keyed by what it says rather than
+/// where it sat, so the same hint coming back stays hidden.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dismissal {
+    pub kind: HintKind,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved: Option<Approval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hints: Option<Hints>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dismissed: Vec<Dismissal>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -54,7 +77,36 @@ impl ItemState {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.approved.is_none() && self.note.is_none()
+        self.approved.is_none()
+            && self.note.is_none()
+            && self.hints.is_none()
+            && self.dismissed.is_empty()
+    }
+
+    /// The cached hints for `current_hash`, each marked dismissed when a
+    /// dismissal matches it. A hash that does not match has no hints: the
+    /// text moved on, the reading did not.
+    pub fn hints_for(&self, current_hash: u64) -> Vec<Hint> {
+        let Some(hints) = &self.hints else {
+            return Vec::new();
+        };
+        if hints.text_hash != current_hash {
+            return Vec::new();
+        }
+        hints
+            .items
+            .iter()
+            .map(|h| Hint {
+                dismissed: h.dismissed || self.is_dismissed(h),
+                ..h.clone()
+            })
+            .collect()
+    }
+
+    fn is_dismissed(&self, hint: &Hint) -> bool {
+        self.dismissed
+            .iter()
+            .any(|d| d.kind == hint.kind && d.message == hint.message)
     }
 }
 
@@ -183,6 +235,53 @@ impl Store {
     pub fn set_note(&mut self, key: &str, note: Option<String>) -> Result<ItemState, StateError> {
         self.update(key, |item| {
             item.note = note.filter(|n| !n.trim().is_empty());
+        })
+    }
+
+    /// Replace the cached hints for `key`. A re-run overwrites; a hint the
+    /// reviewer already dismissed comes back dismissed.
+    pub fn set_hints(
+        &mut self,
+        key: &str,
+        text_hash: u64,
+        items: Vec<Hint>,
+    ) -> Result<ItemState, StateError> {
+        self.update(key, |item| {
+            let items = items
+                .into_iter()
+                .map(|h| Hint {
+                    dismissed: item.is_dismissed(&h),
+                    ..h
+                })
+                .collect();
+            item.hints = Some(Hints { text_hash, items });
+        })
+    }
+
+    pub fn dismiss_hint(
+        &mut self,
+        key: &str,
+        kind: HintKind,
+        message: &str,
+    ) -> Result<ItemState, StateError> {
+        self.update(key, |item| {
+            if !item
+                .dismissed
+                .iter()
+                .any(|d| d.kind == kind && d.message == message)
+            {
+                item.dismissed.push(Dismissal {
+                    kind,
+                    message: message.to_string(),
+                });
+            }
+            if let Some(hints) = &mut item.hints {
+                for hint in &mut hints.items {
+                    if hint.kind == kind && hint.message == message {
+                        hint.dismissed = true;
+                    }
+                }
+            }
         })
     }
 }

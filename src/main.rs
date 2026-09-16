@@ -33,6 +33,12 @@ struct OutputFlags {
     /// Neither read nor write approvals and notes.
     #[arg(long, global = true)]
     no_state: bool,
+    /// Ask the configured agent for hints on every pairing before printing.
+    #[arg(long, global = true)]
+    assist: bool,
+    /// Include hints in --findings-only output.
+    #[arg(long, global = true)]
+    hints: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -70,6 +76,17 @@ enum Command {
         #[command(subcommand)]
         action: SkillsAction,
     },
+    /// The agent the reviewer hands a pairing to.
+    Assist {
+        #[command(subcommand)]
+        action: AssistAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AssistAction {
+    /// Write the built-in prompt templates to openspec/reviewer/prompts/.
+    Prompts,
 }
 
 #[derive(Subcommand)]
@@ -118,6 +135,9 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     if let Command::Skills { action } = command {
         return run_skills(&root, action);
     }
+    if let Command::Assist { action } = command {
+        return run_assist(&root, action);
+    }
     let source: Box<dyn Source> = match command {
         Command::Change { name } => Box::new(ChangeSource {
             root: root.clone(),
@@ -136,7 +156,9 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             root: root.clone(),
             pr,
         }),
-        Command::Lint { .. } | Command::Skills { .. } => unreachable!("handled above"),
+        Command::Lint { .. } | Command::Skills { .. } | Command::Assist { .. } => {
+            unreachable!("handled above")
+        }
     };
     let snapshot = source.fetch()?;
     let review = build_review(&root, &snapshot)?;
@@ -145,15 +167,20 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     } else {
         openspec_reviewer::state::state_home()
     };
-    let built = attach_state(&root, review, state_home.as_deref())?;
+    let mut built = attach_state(&root, review, state_home.as_deref())?;
+    let session = assist_session(&root, state_home.as_deref(), &built.review);
 
     let interactive = std::io::stdout().is_terminal()
         && !cli.output.plain
         && cli.output.format.is_none()
         && !cli.output.findings_only;
     if interactive {
-        tui::run(built.review, built.stores)?;
+        tui::run(built.review, built.stores, Some(session))?;
         return Ok(0);
+    }
+
+    if cli.output.assist {
+        batch_review(&session, &mut built)?;
     }
 
     let code = built.review.summary.exit_code() as u8;
@@ -165,6 +192,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             text::TextOptions {
                 colour: cli.output.color,
                 findings_only: cli.output.findings_only,
+                hints: cli.output.hints,
             },
         ),
     };
@@ -196,6 +224,69 @@ fn run_lint(
         }
     }
     Ok(report.exit_code() as u8)
+}
+
+/// `--assist`: one agent call per pairing without a valid cache, in list
+/// order, before anything prints. Sequential, like the view's batch run.
+fn batch_review(
+    session: &openspec_reviewer::assist::Session,
+    built: &mut openspec_reviewer::build::Built,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let agent = session.assistant()?;
+    for change in &mut built.review.changes {
+        let Some(store) = built.stores.get_mut(&change.name) else {
+            continue;
+        };
+        for p in change.pairings_mut() {
+            let hash = p.text_hash();
+            if !p.hints.is_empty() {
+                continue;
+            }
+            let hints = session.review_pairing(agent.as_ref(), p)?;
+            let state = store.set_hints(&p.key(), hash, hints)?;
+            p.hints = state.hints_for(hash);
+            p.state = state;
+        }
+    }
+    built.review.recount();
+    Ok(())
+}
+
+/// Prompt files live beside the approvals, under the state directory, so
+/// they survive the run and travel with nothing. Without a state home they
+/// go to a temporary directory.
+fn assist_session(
+    root: &std::path::Path,
+    state_home: Option<&std::path::Path>,
+    review: &openspec_reviewer::review::Review,
+) -> openspec_reviewer::assist::Session {
+    let prompt_dir = match state_home {
+        Some(home) => home
+            .join("openspec-reviewer")
+            .join(openspec_reviewer::source::repo_key(root))
+            .join("prompts"),
+        None => std::env::temp_dir().join("openspec-reviewer-prompts"),
+    };
+    openspec_reviewer::assist::Session::open(root, prompt_dir)
+        .with_glossary(review.glossary.clone())
+}
+
+fn run_assist(
+    root: &std::path::Path,
+    action: AssistAction,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    match action {
+        AssistAction::Prompts => {
+            let export = openspec_reviewer::assist::export_prompts(root)?;
+            for path in &export.written {
+                println!("wrote {path}");
+            }
+            for path in &export.skipped {
+                println!("kept  {path} (already there)");
+            }
+        }
+    }
+    Ok(0)
 }
 
 fn run_skills(

@@ -23,6 +23,16 @@ pub fn finding_marker(p: &Pairing) -> &'static str {
     }
 }
 
+/// `✦` when an agent left a hint the reviewer has not dismissed. It sits
+/// after the finding markers, so a row can carry both.
+pub fn hint_marker(p: &Pairing) -> &'static str {
+    if p.has_hint() {
+        "✦"
+    } else {
+        ""
+    }
+}
+
 pub fn note_marker(has_note: bool) -> &'static str {
     if has_note {
         "✎"

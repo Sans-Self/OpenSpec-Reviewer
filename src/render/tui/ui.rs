@@ -79,6 +79,7 @@ fn row_line(app: &App, row: &Row, palette: Palette) -> Line<'static> {
                 Span::raw(p.name.clone()),
                 Span::raw(" "),
                 Span::styled(finding_marker(p).to_string(), marker_style),
+                Span::styled(crate::render::hint_marker(p).to_string(), palette.muted()),
                 Span::raw(note_marker(p.state.note.is_some()).to_string()),
             ])
         }
@@ -145,8 +146,40 @@ fn severity_style(s: Severity, palette: Palette) -> Style {
     match s {
         Severity::Error => palette.error(),
         Severity::Warning => palette.warning(),
-        Severity::Note => palette.muted(),
+        Severity::Note | Severity::Hint => palette.muted(),
     }
+}
+
+/// The hints under the findings, the selected one marked. Only the pairing
+/// the cursor is on can have a selection, so only it shows the marker.
+fn hint_lines(app: &App, p: &crate::review::Pairing, palette: Palette) -> Vec<Line<'static>> {
+    let hints: Vec<_> = p.visible_hints().collect();
+    if hints.is_empty() {
+        return Vec::new();
+    }
+    let selected = app
+        .current_pairing()
+        .filter(|current| current.key() == p.key() && app.focus == Pane::Detail)
+        .map(|_| app.hint_cursor.min(hints.len() - 1));
+    let mut lines = Vec::new();
+    for (i, hint) in hints.iter().enumerate() {
+        let marker = if selected == Some(i) { "✦>" } else { "✦ " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker} "), palette.muted()),
+            Span::styled(format!("{}: ", hint.kind), palette.muted()),
+            Span::raw(hint.message.clone()),
+        ]));
+        if let Some(scenario) = &hint.scenario {
+            lines.push(Line::styled(
+                format!("    in scenario: {scenario}"),
+                palette.muted(),
+            ));
+        }
+        if let Some(quote) = &hint.quote {
+            lines.push(Line::styled(format!("    {quote}"), palette.muted()));
+        }
+    }
+    lines
 }
 
 fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
@@ -197,6 +230,7 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                     .map(|d| Line::styled(format!("    {d}"), palette.muted())),
             );
         }
+        lines.extend(hint_lines(app, p, palette));
         if let Some(note) = &p.state.note {
             lines.push(Line::styled("✎ note", palette.heading()));
             lines.extend(note.lines().map(|l| Line::raw(format!("  {l}"))));
@@ -390,10 +424,24 @@ pub fn status_text(app: &App) -> String {
         },
         _ => app.mode.label(),
     };
+    let hints = app.review.summary.hints;
+    let hint_count = if hints > 0 {
+        format!(" {hints} hints")
+    } else {
+        String::new()
+    };
     let mut s = format!(
-        " {}  {approved}/{total} approved  {e} errors {w} warnings {n} notes  mode: {mode}  ? help",
+        " {}  {approved}/{total} approved  {e} errors {w} warnings {n} notes{hint_count}  mode: {mode}  ? help",
         app.current_change_name()
     );
+    if let Some(batch) = &app.batch {
+        s.push_str(&format!(
+            "  {} asking the agent {}/{}",
+            batch.spinner(),
+            batch.done,
+            batch.total
+        ));
+    }
     if let Some(m) = &app.message {
         s.push_str("  ");
         s.push_str(m);

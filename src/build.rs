@@ -319,8 +319,10 @@ pub fn attach_state(
         }
         for p in change.pairings_mut() {
             p.state = store.get(&p.key());
+            p.hints = p.state.hints_for(p.text_hash());
         }
         stores.insert(change.name.clone(), store);
     }
+    review.recount();
     Ok(Built { review, stores })
 }

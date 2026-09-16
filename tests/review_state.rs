@@ -110,6 +110,7 @@ fn a_requirement_can_carry_a_note() {
         text::TextOptions {
             colour: false,
             findings_only: false,
+            hints: false,
         },
     );
     assert!(plain.contains("✎ note: Looks fine"));
@@ -208,6 +209,7 @@ fn an_approval_is_tied_to_the_text_it_approved() {
         text::TextOptions {
             colour: false,
             findings_only: false,
+            hints: false,
         },
     );
     assert!(plain.contains("text changed since approval"));
