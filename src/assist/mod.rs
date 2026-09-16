@@ -8,13 +8,15 @@
 pub mod files;
 pub mod parse;
 pub mod prompt;
+pub mod session;
 
 mod adapters;
 
 pub use adapters::{assistant, Claude, Codex, Custom, Opencode};
 pub use files::{export_prompts, load_template, spec_rules, Export};
 pub use parse::parse_hints;
-pub use prompt::{change_prompt, pairing_prompt, GlossaryTerm, PromptContext, SiblingText};
+pub use prompt::{change_prompt, glossary_terms, pairing_prompt, PromptContext, SiblingText};
+pub use session::Session;
 
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;

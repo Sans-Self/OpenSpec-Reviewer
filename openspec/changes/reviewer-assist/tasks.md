@@ -10,12 +10,12 @@
 
 ## 2. Prompts
 
-- [ ] 2.1 Built-in `pairing.md`, `change.md`, `hints.md` templates
+- [x] 2.1 Built-in `pairing.md`, `change.md`, `hints.md` templates
       embedded in the binary; the pairing template asks for the six
       judgment kinds and forbids restating known findings.
-- [ ] 2.2 Prompt assembler over a pairing and its context; empty
+- [x] 2.2 Prompt assembler over a pairing and its context; empty
       sections omitted; rules quoted from `openspec/config.yaml`.
-- [ ] 2.3 Override loading from `openspec/reviewer/prompts/`;
+- [x] 2.3 Override loading from `openspec/reviewer/prompts/`;
       `assist prompts` subcommand writing defaults without overwriting.
 
 ## 3. Handoff
@@ -44,7 +44,7 @@
 
 ## 6. Wrap-up
 
-- [ ] 6.1 Fake-CLI fixtures: valid reply, malformed reply, non-zero
+- [x] 6.1 Fake-CLI fixtures: valid reply, malformed reply, non-zero
       exit.
 - [ ] 6.2 Every requirement cited from at least one test title.
 - [ ] 6.3 README section on configuring an agent and exporting prompts.

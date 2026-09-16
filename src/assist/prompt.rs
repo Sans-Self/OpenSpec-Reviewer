@@ -4,6 +4,7 @@
 //! A section with no data is left out rather than written as an empty
 //! heading, so the agent is never told "Glossary:" followed by nothing.
 
+use crate::glossary::{Glossary, Term};
 use crate::model::{Canon, Requirement};
 use crate::review::pair::requirement_text;
 use crate::review::Pairing;
@@ -18,23 +19,25 @@ pub struct SiblingText {
     pub text: String,
 }
 
-/// A glossary term the after text uses.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GlossaryTerm {
-    pub name: String,
-    pub meaning: String,
-    pub deprecated: Vec<String>,
-}
-
 /// Everything a pairing prompt quotes besides the pairing itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptContext {
     /// `rules.specs` from `openspec/config.yaml`, verbatim.
     pub rules: Vec<String>,
     pub siblings: Vec<SiblingText>,
-    pub glossary: Vec<GlossaryTerm>,
+    pub glossary: Vec<Term>,
     /// The hint schema, appended for a batch run only.
     pub schema: Option<String>,
+}
+
+/// The glossary terms a text uses, in glossary order.
+pub fn glossary_terms(glossary: &Glossary, text: &str) -> Vec<Term> {
+    glossary
+        .terms
+        .iter()
+        .filter(|t| t.used_in(text))
+        .cloned()
+        .collect()
 }
 
 fn section(out: &mut String, heading: &str, body: &str) {
@@ -88,11 +91,14 @@ fn siblings_block(siblings: &[SiblingText]) -> String {
         .join("\n\n")
 }
 
-fn glossary_block(terms: &[GlossaryTerm]) -> String {
+fn glossary_block(terms: &[Term]) -> String {
     terms
         .iter()
         .map(|t| {
             let mut entry = format!("### {}\n\n{}", t.name, t.meaning.trim_end());
+            if !t.admitted.is_empty() {
+                let _ = write!(entry, "\n\nAdmitted: {}", t.admitted.join(", "));
+            }
             if !t.deprecated.is_empty() {
                 let _ = write!(entry, "\n\nDeprecated: {}", t.deprecated.join(", "));
             }
@@ -182,72 +188,6 @@ pub fn change_prompt(
         let _ = writeln!(out, "{}", schema.trim_end());
     }
     out
-}
-
-/// The glossary terms a text uses, in canon order. Whole-word and
-/// case-insensitive, with a trailing `s` on the candidate treated as the
-/// same word.
-pub fn glossary_terms(canon: &Canon, capability: &str, text: &str) -> Vec<GlossaryTerm> {
-    let Some(terms) = canon.specs.get(capability) else {
-        return Vec::new();
-    };
-    let haystack = normalize_words(text);
-    terms
-        .iter()
-        .filter(|t| contains_term(&haystack, &t.name))
-        .map(|t| {
-            let (meaning, deprecated) = strip_deprecated(&t.body);
-            GlossaryTerm {
-                name: t.name.clone(),
-                meaning,
-                deprecated,
-            }
-        })
-        .collect()
-}
-
-/// Lowercase words separated by single spaces, punctuation stripped from
-/// the edges, so a term matches on word boundaries and not inside one.
-fn normalize_words(text: &str) -> String {
-    let words: Vec<String> = text
-        .split_whitespace()
-        .map(|w| {
-            w.trim_matches(|c: char| !c.is_alphanumeric())
-                .to_lowercase()
-        })
-        .filter(|w| !w.is_empty())
-        .collect();
-    format!(" {} ", words.join(" "))
-}
-
-fn contains_term(haystack: &str, term: &str) -> bool {
-    let needle = normalize_words(term);
-    let needle = needle.trim();
-    if needle.is_empty() {
-        return false;
-    }
-    haystack.contains(&format!(" {needle} ")) || haystack.contains(&format!(" {needle}s "))
-}
-
-/// A term's body split into its meaning and the `- **Deprecated:**` list.
-fn strip_deprecated(body: &str) -> (String, Vec<String>) {
-    const MARKER: &str = "- **Deprecated:**";
-    let mut meaning = String::new();
-    let mut deprecated = Vec::new();
-    for line in body.lines() {
-        match line.trim().strip_prefix(MARKER) {
-            Some(list) => deprecated.extend(
-                list.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty()),
-            ),
-            None => {
-                meaning.push_str(line);
-                meaning.push('\n');
-            }
-        }
-    }
-    (meaning.trim().to_string(), deprecated)
 }
 
 /// The sibling requirements a pairing's drift findings name, with the

@@ -70,6 +70,17 @@ enum Command {
         #[command(subcommand)]
         action: SkillsAction,
     },
+    /// The agent the reviewer hands a pairing to.
+    Assist {
+        #[command(subcommand)]
+        action: AssistAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AssistAction {
+    /// Write the built-in prompt templates to openspec/reviewer/prompts/.
+    Prompts,
 }
 
 #[derive(Subcommand)]
@@ -118,6 +129,9 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     if let Command::Skills { action } = command {
         return run_skills(&root, action);
     }
+    if let Command::Assist { action } = command {
+        return run_assist(&root, action);
+    }
     let source: Box<dyn Source> = match command {
         Command::Change { name } => Box::new(ChangeSource {
             root: root.clone(),
@@ -136,7 +150,9 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             root: root.clone(),
             pr,
         }),
-        Command::Lint { .. } | Command::Skills { .. } => unreachable!("handled above"),
+        Command::Lint { .. } | Command::Skills { .. } | Command::Assist { .. } => {
+            unreachable!("handled above")
+        }
     };
     let snapshot = source.fetch()?;
     let review = build_review(&root, &snapshot)?;
@@ -196,6 +212,24 @@ fn run_lint(
         }
     }
     Ok(report.exit_code() as u8)
+}
+
+fn run_assist(
+    root: &std::path::Path,
+    action: AssistAction,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    match action {
+        AssistAction::Prompts => {
+            let export = openspec_reviewer::assist::export_prompts(root)?;
+            for path in &export.written {
+                println!("wrote {path}");
+            }
+            for path in &export.skipped {
+                println!("kept  {path} (already there)");
+            }
+        }
+    }
+    Ok(0)
 }
 
 fn run_skills(

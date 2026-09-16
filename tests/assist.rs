@@ -7,7 +7,7 @@ mod common;
 
 use common::*;
 use openspec_reviewer::assist::{
-    assistant, files, parse_hints, Agent, Assist, AssistError, Hint, HintKind,
+    assistant, files, parse_hints, Agent, Assist, AssistError, Hint, HintKind, Session,
 };
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -364,4 +364,195 @@ fn the_default_prompt_asks_for_judgment_not_repetition__schema_lists_every_kind(
             "the schema lists `{kind}`"
         );
     }
+}
+
+const RULES_YAML: &str = "\
+schema: spec-driven
+
+context: |
+  A test project.
+
+rules:
+  specs:
+    - One condition per keyword line. A second condition goes on its own
+      `- **AND**` line.
+    - Name the thing: a path, a key, a flag.
+  proposal:
+    - Under 600 words.
+";
+
+/// A repository whose change drops terms a sibling still uses and whose
+/// text says a glossary term, so one pairing carries a warning, a drift
+/// hit and a term.
+fn prompt_repo() -> Repo {
+    let repo = Repo::new();
+    repo.write("openspec/config.yaml", RULES_YAML)
+        .canon("key-rotation", &fixture("drift", "key-rotation.md"))
+        .canon(
+            "keyring-tombstones",
+            &fixture("drift", "keyring-tombstones.md"),
+        )
+        .canon("definitions", &fixture("glossary", "definitions.md"))
+        .delta(
+            "epoch-retire",
+            "key-rotation",
+            &fixture("drift", "delta.md"),
+        )
+        .write(
+            "openspec/changes/epoch-retire/proposal.md",
+            "# epoch-retire\n\nRetire the epoch.\n",
+        );
+    repo
+}
+
+fn review_of(repo: &Repo, change: &str) -> openspec_reviewer::review::Review {
+    let source = openspec_reviewer::source::ChangeSource {
+        root: repo.root().into(),
+        name: change.into(),
+    };
+    let snapshot = openspec_reviewer::source::Source::fetch(&source).expect("the change reads");
+    openspec_reviewer::build::build_review(repo.root(), &snapshot).expect("the review builds")
+}
+
+fn session_of(repo: &Repo) -> Session {
+    Session::open(repo.root(), repo.state_home().join("prompts"))
+}
+
+#[test]
+fn a_prompt_file_carries_the_pairings_full_context__pairing_prompt() {
+    let repo = prompt_repo();
+    let review = review_of(&repo, "epoch-retire");
+    let session = session_of(&repo).with_glossary(review.glossary.clone());
+    let pairing = review.pairings().next().expect("one pairing");
+    assert!(
+        pairing
+            .findings
+            .iter()
+            .any(|f| f.severity == openspec_reviewer::review::Severity::Warning),
+        "the fixture pairing has a warning: {:?}",
+        pairing.findings
+    );
+    let text = session.pairing_text(pairing, false);
+
+    assert!(text.contains("## Project rules"));
+    assert!(text.contains("One condition per keyword line"));
+    assert!(!text.contains("Under 600 words"), "only the spec rules");
+    assert!(text.contains("## Before"));
+    assert!(text.contains("## After"));
+    assert!(text.contains("## Known findings"));
+    assert!(
+        text.contains("- warning  "),
+        "the finding carries its severity"
+    );
+    assert!(text.contains("## Sibling texts"));
+    assert!(text.contains("keyring-tombstones §"));
+    assert!(text.contains("## Glossary"));
+    assert!(text.contains("### ledger"));
+    assert!(text.contains("Admitted: log"));
+
+    let at = |heading: &str| text.find(heading).expect(heading);
+    assert!(
+        at("## Project rules") < at("## Pairing")
+            && at("## Pairing") < at("## Known findings")
+            && at("## Known findings") < at("## Sibling texts")
+            && at("## Sibling texts") < at("## Glossary"),
+        "the sections come in the order the requirement gives"
+    );
+}
+
+#[test]
+fn a_prompt_file_carries_the_pairings_full_context__no_glossary() {
+    let repo = prompt_repo();
+    repo.remove("openspec/specs/definitions");
+    let review = review_of(&repo, "epoch-retire");
+    let session = session_of(&repo).with_glossary(review.glossary.clone());
+    let pairing = review.pairings().next().expect("one pairing");
+    let text = session.pairing_text(pairing, false);
+    assert!(
+        !text.contains("## Glossary"),
+        "no heading with nothing under it"
+    );
+    assert!(text.contains("## Sibling texts"), "the rest is unchanged");
+    assert!(text.contains("## Project rules"));
+}
+
+#[test]
+fn a_prompt_file_carries_the_pairings_full_context__reviewer_note() {
+    let repo = prompt_repo();
+    let review = review_of(&repo, "epoch-retire");
+    let session = session_of(&repo);
+    let mut pairing = review.pairings().next().expect("one pairing").clone();
+    assert!(
+        !session
+            .pairing_text(&pairing, false)
+            .contains("## Reviewer note"),
+        "no note, no section"
+    );
+    pairing.state.note = Some("check the grace window".to_string());
+    let text = session.pairing_text(&pairing, false);
+    assert!(text.contains("## Reviewer note"));
+    assert!(text.contains("check the grace window"));
+}
+
+#[test]
+fn a_prompt_file_carries_the_pairings_full_context__whole_change() {
+    let repo = prompt_repo();
+    let review = review_of(&repo, "epoch-retire");
+    let session = session_of(&repo).with_glossary(review.glossary.clone());
+    let pairings: Vec<_> = review.pairings().collect();
+    let text = session.change_text(
+        "epoch-retire",
+        Some("# epoch-retire\n\nRetire the epoch.\n"),
+        &pairings,
+        false,
+    );
+    assert!(text.contains("## Proposal"));
+    assert!(text.contains("Retire the epoch."));
+    for p in &pairings {
+        assert!(
+            text.contains(&format!("# {} § {}", p.capability, p.name)),
+            "{} has a section",
+            p.name
+        );
+    }
+    assert_eq!(
+        text.matches("## Project rules").count(),
+        1,
+        "the rules are quoted once"
+    );
+}
+
+#[test]
+fn a_prompt_file_carries_the_pairings_full_context__the_schema_is_batch_only() {
+    let repo = prompt_repo();
+    let review = review_of(&repo, "epoch-retire");
+    let session = session_of(&repo);
+    let pairing = review.pairings().next().expect("one pairing");
+    assert!(!session.pairing_text(pairing, false).contains("## Reply"));
+    assert!(session.pairing_text(pairing, true).contains("## Reply"));
+}
+
+#[test]
+fn a_prompt_file_carries_the_pairings_full_context__rules_read_from_config_yaml() {
+    let repo = Repo::new();
+    repo.write("openspec/config.yaml", RULES_YAML);
+    let rules = openspec_reviewer::assist::spec_rules(repo.root());
+    assert_eq!(rules.len(), 2);
+    assert!(rules[0].starts_with("One condition per keyword line."));
+    assert!(rules[0].ends_with("`- **AND**` line."));
+    assert_eq!(rules[1], "Name the thing: a path, a key, a flag.");
+    assert!(
+        openspec_reviewer::assist::spec_rules(Repo::new().root()).is_empty(),
+        "no config.yaml, no rules"
+    );
+}
+
+#[test]
+fn prompt_templates_ship_and_can_be_overridden__the_prompts_subcommand() {
+    let repo = Repo::new();
+    let first = run_in(repo.root(), &["assist", "prompts"]);
+    assert!(first.status.success());
+    assert!(stdout(&first).contains("wrote openspec/reviewer/prompts/pairing.md"));
+    let again = run_in(repo.root(), &["assist", "prompts"]);
+    assert!(stdout(&again).contains("kept  openspec/reviewer/prompts/pairing.md"));
 }
