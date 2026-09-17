@@ -282,6 +282,39 @@ fn the_git_source_reads_two_refs__unknown_ref() {
 }
 
 #[test]
+fn the_gh_source_reads_a_pull_request__open_pull_request() {
+    gh_stub();
+    let repo = branch_repo();
+    let patch = repo.git(&["diff", "main...feature/foo"]);
+    repo.gh("pr.diff", &patch).gh(
+        "pr-view.json",
+        "{\"number\":224,\
+          \"url\":\"https://github.com/acme/widgets/pull/224\",\
+          \"headRefOid\":\"cafe1234\"}",
+    );
+
+    let snap = openspec_reviewer::source::GhSource {
+        root: repo.root().into(),
+        pr: "224".into(),
+    }
+    .fetch()
+    .unwrap();
+    let via_diff = parse_diff(repo.root(), &patch, "diff".into()).unwrap();
+    assert_eq!(snap.files, via_diff.files, "the diff source's snapshot");
+    let pr = snap
+        .pull_request
+        .expect("the pull request is on the snapshot");
+    assert_eq!((pr.number, pr.head.as_str()), (224, "cafe1234"));
+    assert_eq!(pr.owner_repo(), Some(("acme", "widgets")));
+    let args = std::fs::read_to_string(repo.root().join("gh/args")).unwrap();
+    assert!(
+        args.contains("pr view 224 --json number,url,headRefOid"),
+        "{args}"
+    );
+    assert!(args.contains("pr diff 224"), "{args}");
+}
+
+#[test]
 fn the_gh_source_reads_a_pull_request__gh_missing() {
     let repo = Repo::new();
     let out = std::process::Command::new(exe())
