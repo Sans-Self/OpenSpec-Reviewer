@@ -2,12 +2,11 @@
 //! and rows is a unit test over an `App`.
 
 use crate::render::approval;
-use crate::review::normalize::text_hash;
 use crate::review::pair::{diff_versions, version_lines};
-use crate::review::{inline_view, DiffLine, Pairing, Review};
+use crate::review::{inline_view, scenario_view, DiffLine, Pairing, Review, ScenarioMatch};
 use crate::state::{ApprovalStatus, Store};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
@@ -27,11 +26,49 @@ pub enum Row {
         capability: usize,
         index: usize,
     },
+    Scenario {
+        change: usize,
+        capability: usize,
+        index: usize,
+        scenario: usize,
+    },
 }
+
+/// Which requirement a row belongs to, which is also what folds.
+type Anchor = (usize, usize, usize);
 
 impl Row {
     pub fn selectable(&self) -> bool {
-        matches!(self, Row::Artefact { .. } | Row::Requirement { .. })
+        matches!(
+            self,
+            Row::Artefact { .. } | Row::Requirement { .. } | Row::Scenario { .. }
+        )
+    }
+
+    /// The requirement a row is or hangs under.
+    pub fn anchor(&self) -> Option<Anchor> {
+        match *self {
+            Row::Requirement {
+                change,
+                capability,
+                index,
+            }
+            | Row::Scenario {
+                change,
+                capability,
+                index,
+                ..
+            } => Some((change, capability, index)),
+            _ => None,
+        }
+    }
+
+    fn requirement_row(anchor: Anchor) -> Row {
+        Row::Requirement {
+            change: anchor.0,
+            capability: anchor.1,
+            index: anchor.2,
+        }
     }
 }
 
@@ -79,34 +116,63 @@ pub struct HistoryState {
     pub scroll: u16,
 }
 
+/// A note being written: the anchor it hangs on, quoted so the popup does
+/// not depend on what the detail pane happens to be showing, and one flat
+/// buffer that wraps at render width.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum View {
-    Main,
-    History(HistoryState),
+pub struct NoteEdit {
+    pub row: Row,
+    pub title: String,
+    pub quote: Vec<String>,
+    pub buffer: String,
+}
+
+/// An overlay any key closes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transient {
     Help,
+}
+
+/// An overlay that swallows every key until it closes itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Modal {
+    History(HistoryState),
+    Note(NoteEdit),
+}
+
+/// Where the keys go. One modal at a time: a flat enum, not a stack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Focus {
+    Browsing,
+    Transient(Transient),
+    Modal(Modal),
 }
 
 /// What the event loop has to do outside the app: only the editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
-    EditNote,
+    /// `^E`: suspend the view and hand the popup's buffer to `$EDITOR`.
+    EscalateNote,
 }
 
 pub struct App {
     pub review: Review,
     pub rows: Vec<Row>,
     pub cursor: usize,
-    pub focus: Pane,
+    pub pane: Pane,
     pub mode: DetailMode,
     pub scroll: u16,
-    pub view: View,
+    pub focus: Focus,
     pub quit: bool,
     pub message: Option<String>,
     pub stores: BTreeMap<String, Store>,
     /// Lines the detail pane can show at once; set by the drawer.
     pub detail_height: u16,
     /// Pairings whose definitions panel is open, by key.
-    pub definitions_open: std::collections::BTreeSet<String>,
+    pub definitions_open: BTreeSet<String>,
+    /// Requirements whose scenarios are showing. Folded is the default, so
+    /// an empty set is a view that has just opened.
+    pub unfolded: BTreeSet<Anchor>,
 }
 
 pub const BINDINGS: &[(&str, &str)] = &[
@@ -114,17 +180,21 @@ pub const BINDINGS: &[(&str, &str)] = &[
     ("k / ↑", "previous row"),
     ("Tab", "switch pane focus"),
     ("n / p", "next / previous row with a finding"),
-    ("a", "toggle approval"),
-    ("e", "edit note in $EDITOR"),
+    ("Space", "fold / unfold a requirement's scenarios"),
+    ("a", "toggle approval (on a scenario: its requirement)"),
+    ("e", "write a note on this row"),
+    ("⏎ / Esc", "in the note popup: save / cancel"),
+    ("^E", "in the note popup: hand the text to $EDITOR"),
     ("H", "history of this requirement"),
     ("m", "cycle display mode (inline, side-by-side, raw)"),
     ("D", "definitions of the terms this requirement uses"),
     ("PgUp / PgDn, Ctrl-u / Ctrl-d", "scroll the detail pane"),
     ("?", "this help"),
-    ("q / Esc", "quit (Esc closes history first)"),
+    ("q / Esc", "quit (Esc closes an overlay first)"),
 ];
 
-fn build_rows(review: &Review) -> Vec<Row> {
+/// Every row the list can hold, folds ignored.
+fn all_rows(review: &Review) -> Vec<Row> {
     let mut rows = Vec::new();
     let multi = review.changes.len() > 1;
     for (ci, change) in review.changes.iter().enumerate() {
@@ -142,35 +212,54 @@ fn build_rows(review: &Review) -> Vec<Row> {
                 change: ci,
                 capability: capi,
             });
-            for pi in 0..cap.pairings.len() {
+            for (pi, p) in cap.pairings.iter().enumerate() {
                 rows.push(Row::Requirement {
                     change: ci,
                     capability: capi,
                     index: pi,
                 });
+                for si in 0..p.diff.scenarios.len() {
+                    rows.push(Row::Scenario {
+                        change: ci,
+                        capability: capi,
+                        index: pi,
+                        scenario: si,
+                    });
+                }
             }
         }
     }
     rows
 }
 
+fn visible_rows(review: &Review, unfolded: &BTreeSet<Anchor>) -> Vec<Row> {
+    all_rows(review)
+        .into_iter()
+        .filter(|row| match row {
+            Row::Scenario { .. } => row.anchor().is_some_and(|a| unfolded.contains(&a)),
+            _ => true,
+        })
+        .collect()
+}
+
 impl App {
     pub fn new(review: Review, stores: BTreeMap<String, Store>) -> App {
-        let rows = build_rows(&review);
+        let rows = visible_rows(&review, &BTreeSet::new());
         let cursor = rows.iter().position(Row::selectable).unwrap_or(0);
         App {
             review,
             rows,
             cursor,
-            focus: Pane::List,
+            pane: Pane::List,
             mode: DetailMode::Inline,
             scroll: 0,
-            view: View::Main,
+            focus: Focus::Browsing,
             quit: false,
             message: None,
             stores,
             detail_height: 20,
-            definitions_open: std::collections::BTreeSet::new(),
+            definitions_open: BTreeSet::new(),
+            unfolded: BTreeSet::new(),
         }
     }
 
@@ -193,56 +282,48 @@ impl App {
         self.rows.get(self.cursor)
     }
 
+    /// The pairing of the row under the cursor, scenario rows included.
     pub fn current_pairing(&self) -> Option<&Pairing> {
-        match self.current_row()? {
-            Row::Requirement {
-                change,
-                capability,
-                index,
-            } => self
-                .review
-                .changes
-                .get(*change)?
-                .capabilities
-                .get(*capability)?
-                .pairings
-                .get(*index),
-            _ => None,
-        }
+        self.pairing_under(self.current_row()?)
     }
 
-    fn current_pairing_mut(&mut self) -> Option<&mut Pairing> {
-        match self.rows.get(self.cursor)?.clone() {
-            Row::Requirement {
-                change,
-                capability,
-                index,
-            } => self
-                .review
-                .changes
-                .get_mut(change)?
-                .capabilities
-                .get_mut(capability)?
-                .pairings
-                .get_mut(index),
-            _ => None,
-        }
+    fn pairing_mut(&mut self, anchor: Anchor) -> Option<&mut Pairing> {
+        self.review
+            .changes
+            .get_mut(anchor.0)?
+            .capabilities
+            .get_mut(anchor.1)?
+            .pairings
+            .get_mut(anchor.2)
     }
 
+    /// The pairing a row shows: only a requirement row has one of its own.
     pub fn pairing_at(&self, row: &Row) -> Option<&Pairing> {
         match row {
-            Row::Requirement {
-                change,
-                capability,
-                index,
-            } => self
-                .review
-                .changes
-                .get(*change)?
-                .capabilities
-                .get(*capability)?
-                .pairings
-                .get(*index),
+            Row::Requirement { .. } => self.pairing_under(row),
+            _ => None,
+        }
+    }
+
+    /// The pairing a row belongs to, a scenario row's parent included.
+    pub fn pairing_under(&self, row: &Row) -> Option<&Pairing> {
+        let (change, capability, index) = row.anchor()?;
+        self.review
+            .changes
+            .get(change)?
+            .capabilities
+            .get(capability)?
+            .pairings
+            .get(index)
+    }
+
+    /// A scenario row's pairing and the scenario it names.
+    pub fn scenario_at(&self, row: &Row) -> Option<(&Pairing, &ScenarioMatch)> {
+        match row {
+            Row::Scenario { scenario, .. } => {
+                let p = self.pairing_under(row)?;
+                Some((p, p.diff.scenarios.get(*scenario)?))
+            }
             _ => None,
         }
     }
@@ -261,7 +342,8 @@ impl App {
             Some(Row::Change { change })
             | Some(Row::Artefact { change, .. })
             | Some(Row::Capability { change, .. })
-            | Some(Row::Requirement { change, .. }) => *change,
+            | Some(Row::Requirement { change, .. })
+            | Some(Row::Scenario { change, .. }) => *change,
             None => 0,
         };
         self.review
@@ -271,8 +353,9 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// `approved / total` over every selectable row; stale counts as not
-    /// approved.
+    /// `approved / total` over every approvable row; stale counts as not
+    /// approved. Scenario rows carry no approval of their own, so folding
+    /// never moves the total.
     pub fn approval_counts(&self) -> (usize, usize) {
         let mut approved = 0;
         let mut total = 0;
@@ -284,12 +367,43 @@ impl App {
                 }
             } else if let Some(a) = self.artefact_at(row) {
                 total += 1;
-                if a.state.status(artefact_hash(a)) == ApprovalStatus::Approved {
+                if a.state.status(a.text_hash()) == ApprovalStatus::Approved {
                     approved += 1;
                 }
             }
         }
         (approved, total)
+    }
+
+    fn index_of(&self, row: &Row) -> Option<usize> {
+        self.rows.iter().position(|r| r == row)
+    }
+
+    /// Rebuild the list after a fold, keeping the cursor on the row it was
+    /// on, or on that row's requirement when the fold hid it.
+    fn rebuild_rows(&mut self) {
+        let keep = self.current_row().cloned();
+        self.rows = visible_rows(&self.review, &self.unfolded);
+        self.cursor = keep
+            .and_then(|row| {
+                self.index_of(&row).or_else(|| {
+                    row.anchor()
+                        .and_then(|a| self.index_of(&Row::requirement_row(a)))
+                })
+            })
+            .unwrap_or_else(|| self.rows.iter().position(Row::selectable).unwrap_or(0));
+    }
+
+    /// `Space`: fold or unfold the scenarios of the requirement the cursor
+    /// is on or inside.
+    fn toggle_fold(&mut self) {
+        let Some(anchor) = self.current_row().and_then(Row::anchor) else {
+            return;
+        };
+        if !self.unfolded.remove(&anchor) {
+            self.unfolded.insert(anchor);
+        }
+        self.rebuild_rows();
     }
 
     fn move_cursor(&mut self, forward: bool) {
@@ -314,23 +428,61 @@ impl App {
         }
     }
 
-    fn jump_finding(&mut self, forward: bool) {
-        let len = self.rows.len();
-        let has_finding = |app: &App, i: usize| {
-            app.pairing_at(&app.rows[i])
-                .is_some_and(|p| !p.findings.is_empty())
-        };
-        let candidates: Box<dyn Iterator<Item = usize>> = if forward {
-            Box::new((self.cursor + 1..len).chain(0..self.cursor))
-        } else {
-            Box::new((0..self.cursor).rev().chain((self.cursor + 1..len).rev()))
-        };
-        for i in candidates {
-            if has_finding(self, i) {
-                self.cursor = i;
-                self.scroll = 0;
-                return;
+    /// A finding belongs to the scenario row it names, and to the
+    /// requirement row otherwise — including when it names a scenario that
+    /// has no row, so no finding becomes unreachable.
+    fn row_has_finding(&self, row: &Row) -> bool {
+        match row {
+            Row::Requirement { .. } => {
+                let Some(p) = self.pairing_at(row) else {
+                    return false;
+                };
+                p.findings.iter().any(|f| match &f.location.scenario {
+                    None => true,
+                    Some(s) => !p.diff.scenarios.iter().any(|m| m.name() == s),
+                })
             }
+            Row::Scenario { .. } => {
+                let Some((p, m)) = self.scenario_at(row) else {
+                    return false;
+                };
+                p.findings
+                    .iter()
+                    .any(|f| f.location.scenario.as_deref() == Some(m.name()))
+            }
+            _ => false,
+        }
+    }
+
+    /// `n` and `p`. The search runs over every row, folded or not: the
+    /// cursor has to be able to reach where it is going, so a jump into a
+    /// folded requirement unfolds it.
+    fn jump_finding(&mut self, forward: bool) {
+        let rows = all_rows(&self.review);
+        let start = self
+            .current_row()
+            .and_then(|current| rows.iter().position(|r| r == current))
+            .unwrap_or(0);
+        let len = rows.len();
+        let order: Vec<usize> = if forward {
+            (start + 1..len).chain(0..start).collect()
+        } else {
+            (0..start).rev().chain((start + 1..len).rev()).collect()
+        };
+        let Some(target) = order
+            .into_iter()
+            .map(|i| rows[i].clone())
+            .find(|row| self.row_has_finding(row))
+        else {
+            return;
+        };
+        if let (Row::Scenario { .. }, Some(anchor)) = (&target, target.anchor()) {
+            self.unfolded.insert(anchor);
+        }
+        self.rows = visible_rows(&self.review, &self.unfolded);
+        if let Some(i) = self.index_of(&target) {
+            self.cursor = i;
+            self.scroll = 0;
         }
     }
 
@@ -342,8 +494,8 @@ impl App {
                 scroll.saturating_add(delta as u16)
             }
         };
-        match &mut self.view {
-            View::History(h) => h.scroll = apply(h.scroll),
+        match &mut self.focus {
+            Focus::Modal(Modal::History(h)) => h.scroll = apply(h.scroll),
             _ => self.scroll = apply(self.scroll),
         }
     }
@@ -352,23 +504,37 @@ impl App {
         self.stores.entry(change.to_string()).or_default()
     }
 
+    /// Read a pairing's approval and notes back out of its store.
+    fn sync_pairing(&mut self, anchor: Anchor, change: &str) {
+        let items = self
+            .stores
+            .get(change)
+            .map(|s| s.state.items.clone())
+            .unwrap_or_default();
+        if let Some(p) = self.pairing_mut(anchor) {
+            p.state = items.get(&p.key()).cloned().unwrap_or_default();
+            p.refresh_notes(&items);
+        }
+    }
+
+    /// `a`. On a scenario row this toggles the parent requirement: approval
+    /// is per requirement, and a key that silently does nothing is a bug
+    /// report waiting to happen.
     fn toggle_approval(&mut self) {
         let Some(row) = self.current_row().cloned() else {
             return;
         };
         match row {
-            Row::Requirement { .. } => {
+            Row::Requirement { .. } | Row::Scenario { .. } => {
+                let Some(anchor) = row.anchor() else { return };
                 let (change, key, hash) = {
-                    let p = self.current_pairing().expect("requirement row");
+                    let Some(p) = self.pairing_under(&row) else {
+                        return;
+                    };
                     (p.change.clone(), p.key(), p.text_hash())
                 };
-                let result = self.store_for(&change).toggle_approval(&key, hash);
-                match result {
-                    Ok(state) => {
-                        if let Some(p) = self.current_pairing_mut() {
-                            p.state = state;
-                        }
-                    }
+                match self.store_for(&change).toggle_approval(&key, hash) {
+                    Ok(_) => self.sync_pairing(anchor, &change),
                     Err(e) => self.message = Some(e.to_string()),
                 }
             }
@@ -376,7 +542,7 @@ impl App {
                 let (name, key, hash) = {
                     let c = &self.review.changes[change];
                     let a = &c.artefacts[index];
-                    (c.name.clone(), a.key(), artefact_hash(a))
+                    (c.name.clone(), a.key(), a.text_hash())
                 };
                 let result = self.store_for(&name).toggle_approval(&key, hash);
                 match result {
@@ -388,39 +554,60 @@ impl App {
         }
     }
 
+    /// The text of the note on the row under the cursor.
     pub fn current_note(&self) -> Option<String> {
         let row = self.current_row()?;
-        self.pairing_at(row)
-            .and_then(|p| p.state.note.clone())
-            .or_else(|| self.artefact_at(row).and_then(|a| a.state.note.clone()))
+        match row {
+            Row::Requirement { .. } => self
+                .pairing_at(row)
+                .and_then(Pairing::note)
+                .map(|n| n.text.clone()),
+            Row::Scenario { .. } => self
+                .scenario_at(row)
+                .and_then(|(p, m)| p.scenario_note(m.name()))
+                .map(|n| n.text.clone()),
+            Row::Artefact { .. } => self
+                .artefact_at(row)
+                .and_then(|a| a.state.note.as_ref())
+                .map(|n| n.text.clone()),
+            _ => None,
+        }
     }
 
-    pub fn set_current_note(&mut self, note: Option<String>) {
-        let Some(row) = self.current_row().cloned() else {
-            return;
-        };
+    /// Store a note against the row's own anchor, hashed to the text it is
+    /// written about. An empty note removes it.
+    pub fn set_note_for(&mut self, row: &Row, note: Option<String>) {
         match row {
-            Row::Requirement { .. } => {
-                let (change, key) = {
-                    let p = self.current_pairing().expect("requirement row");
-                    (p.change.clone(), p.key())
-                };
-                match self.store_for(&change).set_note(&key, note) {
-                    Ok(state) => {
-                        if let Some(p) = self.current_pairing_mut() {
-                            p.state = state;
-                        }
+            Row::Requirement { .. } | Row::Scenario { .. } => {
+                let Some(anchor) = row.anchor() else { return };
+                let scenario = self.scenario_at(row).map(|(_, m)| m.name().to_string());
+                let (change, key, hash) = {
+                    let Some(p) = self.pairing_under(row) else {
+                        return;
+                    };
+                    match &scenario {
+                        None => (p.change.clone(), p.key(), p.anchor_hash(None)),
+                        Some(s) => (
+                            p.change.clone(),
+                            p.scenario_key(s),
+                            p.anchor_hash(Some(s.as_str())),
+                        ),
                     }
+                };
+                match self.store_for(&change).set_note(&key, note, hash) {
+                    Ok(_) => self.sync_pairing(anchor, &change),
                     Err(e) => self.message = Some(e.to_string()),
                 }
             }
             Row::Artefact { change, index } => {
-                let (name, key) = {
-                    let c = &self.review.changes[change];
-                    (c.name.clone(), c.artefacts[index].key())
+                let (name, key, hash) = {
+                    let c = &self.review.changes[*change];
+                    let a = &c.artefacts[*index];
+                    (c.name.clone(), a.key(), a.text_hash())
                 };
-                match self.store_for(&name).set_note(&key, note) {
-                    Ok(state) => self.review.changes[change].artefacts[index].state = state,
+                let result = self.store_for(&name).set_note(&key, note, hash);
+                match result {
+                    Ok(state) => self.review.changes[*change].artefacts[*index].state = state,
                     Err(e) => self.message = Some(e.to_string()),
                 }
             }
@@ -428,20 +615,103 @@ impl App {
         }
     }
 
+    pub fn set_current_note(&mut self, note: Option<String>) {
+        let Some(row) = self.current_row().cloned() else {
+            return;
+        };
+        self.set_note_for(&row, note);
+    }
+
+    /// `e`: open the popup on the row under the cursor, quoting what the
+    /// note is about so the text stays legible while it is written.
+    fn open_note(&mut self) {
+        let Some(row) = self.current_row().cloned() else {
+            return;
+        };
+        let (title, quote) = match &row {
+            Row::Requirement { .. } => {
+                let Some(p) = self.pairing_at(&row) else {
+                    return;
+                };
+                let body = p
+                    .after
+                    .as_ref()
+                    .or(p.before.as_ref())
+                    .map(|r| crate::review::normalize::paragraphs(&r.body))
+                    .unwrap_or_default();
+                (format!("Requirement: {}", p.name), body)
+            }
+            Row::Scenario { .. } => {
+                let Some((p, m)) = self.scenario_at(&row) else {
+                    return;
+                };
+                let body = p
+                    .scenario_text(m.name())
+                    .map(|t| t.lines().skip(1).map(str::to_string).collect())
+                    .unwrap_or_default();
+                (format!("Scenario: {}", m.name()), body)
+            }
+            Row::Artefact { .. } => {
+                let Some(a) = self.artefact_at(&row) else {
+                    return;
+                };
+                (a.artefact.name.clone(), Vec::new())
+            }
+            _ => return,
+        };
+        let buffer = self.current_note().unwrap_or_default();
+        self.focus = Focus::Modal(Modal::Note(NoteEdit {
+            row,
+            title,
+            quote,
+            buffer,
+        }));
+    }
+
+    pub fn note_edit(&self) -> Option<&NoteEdit> {
+        match &self.focus {
+            Focus::Modal(Modal::Note(edit)) => Some(edit),
+            _ => None,
+        }
+    }
+
+    /// What `$EDITOR` saved, back into the popup. The buffer holds no line
+    /// breaks, so the editor's lines come back joined.
+    pub fn set_note_buffer(&mut self, text: &str) {
+        if let Focus::Modal(Modal::Note(edit)) = &mut self.focus {
+            edit.buffer = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+    }
+
+    fn save_note(&mut self) {
+        let Some(edit) = self.note_edit() else { return };
+        let row = edit.row.clone();
+        let text = edit.buffer.trim().to_string();
+        self.focus = Focus::Browsing;
+        self.set_note_for(&row, (!text.is_empty()).then_some(text));
+    }
+
     fn open_history(&mut self) {
         if let Some(p) = self.current_pairing() {
             let entries = history_entries(p).len();
-            self.view = View::History(HistoryState {
+            self.focus = Focus::Modal(Modal::History(HistoryState {
                 selected: entries.saturating_sub(1),
                 mode: HistoryMode::Version,
                 scroll: 0,
-            });
+            }));
+        }
+    }
+
+    pub fn history_state(&self) -> Option<&HistoryState> {
+        match &self.focus {
+            Focus::Modal(Modal::History(h)) => Some(h),
+            _ => None,
         }
     }
 
     /// The right pane of the history view for the selected entry.
     pub fn history_lines(&self) -> Vec<DiffLine> {
-        let (Some(p), View::History(h)) = (self.current_pairing(), &self.view) else {
+        let (Some(p), Some(h)) = (self.current_pairing(), self.history_state()) else {
             return Vec::new();
         };
         let versions = history_entries(p);
@@ -459,56 +729,80 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Effect> {
         self.message = None;
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        match &self.view {
-            View::Help => {
-                self.view = View::Main;
-                return None;
+        match &self.focus {
+            Focus::Transient(_) => {
+                self.focus = Focus::Browsing;
+                None
             }
-            View::History(_) => return self.handle_history_key(key),
-            View::Main => {}
+            Focus::Modal(Modal::History(_)) => self.handle_history_key(key),
+            Focus::Modal(Modal::Note(_)) => self.handle_note_key(key),
+            Focus::Browsing => self.handle_browsing_key(key),
         }
+    }
+
+    fn handle_browsing_key(&mut self, key: KeyEvent) -> Option<Effect> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (key.code, ctrl) {
             (KeyCode::Char('c'), true) | (KeyCode::Char('q'), false) | (KeyCode::Esc, false) => {
                 self.quit = true
             }
             (KeyCode::Char('j'), false) | (KeyCode::Down, false) => {
-                if self.focus == Pane::Detail {
+                if self.pane == Pane::Detail {
                     self.scroll_by(1);
                 } else {
                     self.move_cursor(true);
                 }
             }
             (KeyCode::Char('k'), false) | (KeyCode::Up, false) => {
-                if self.focus == Pane::Detail {
+                if self.pane == Pane::Detail {
                     self.scroll_by(-1);
                 } else {
                     self.move_cursor(false);
                 }
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => {
-                self.focus = match self.focus {
+                self.pane = match self.pane {
                     Pane::List => Pane::Detail,
                     Pane::Detail => Pane::List,
                 }
             }
             (KeyCode::Char('n'), false) => self.jump_finding(true),
             (KeyCode::Char('p'), false) => self.jump_finding(false),
+            (KeyCode::Char(' '), false) => self.toggle_fold(),
             (KeyCode::Char('a'), false) => self.toggle_approval(),
-            (KeyCode::Char('e'), false) => {
-                if self.current_row().is_some_and(Row::selectable) {
-                    return Some(Effect::EditNote);
-                }
-            }
+            (KeyCode::Char('e'), false) => self.open_note(),
             (KeyCode::Char('H'), false) => self.open_history(),
             (KeyCode::Char('m'), false) => self.mode = self.mode.next(),
             (KeyCode::Char('D'), false) => self.toggle_definitions(),
-            (KeyCode::Char('?'), false) => self.view = View::Help,
+            (KeyCode::Char('?'), false) => self.focus = Focus::Transient(Transient::Help),
             (KeyCode::PageDown, _) | (KeyCode::Char('d'), true) => {
                 self.scroll_by(i32::from(self.detail_height / 2).max(1))
             }
             (KeyCode::PageUp, _) | (KeyCode::Char('u'), true) => {
                 self.scroll_by(-i32::from(self.detail_height / 2).max(1))
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// Every key belongs to the popup: `q` types a `q`, and `Esc` cancels
+    /// rather than quitting.
+    fn handle_note_key(&mut self, key: KeyEvent) -> Option<Effect> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match (key.code, ctrl) {
+            (KeyCode::Char('e'), true) => return Some(Effect::EscalateNote),
+            (KeyCode::Esc, _) => self.focus = Focus::Browsing,
+            (KeyCode::Enter, _) => self.save_note(),
+            (KeyCode::Backspace, _) => {
+                if let Focus::Modal(Modal::Note(edit)) = &mut self.focus {
+                    edit.buffer.pop();
+                }
+            }
+            (KeyCode::Char(c), false) => {
+                if let Focus::Modal(Modal::Note(edit)) = &mut self.focus {
+                    edit.buffer.push(c);
+                }
             }
             _ => {}
         }
@@ -521,11 +815,11 @@ impl App {
             .map(|p| history_entries(p).len())
             .unwrap_or(0);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let View::History(h) = &mut self.view else {
+        let Focus::Modal(Modal::History(h)) = &mut self.focus else {
             return None;
         };
         match (key.code, ctrl) {
-            (KeyCode::Esc, _) | (KeyCode::Char('H'), false) => self.view = View::Main,
+            (KeyCode::Esc, _) | (KeyCode::Char('H'), false) => self.focus = Focus::Browsing,
             (KeyCode::Char('q'), false) | (KeyCode::Char('c'), true) => self.quit = true,
             (KeyCode::Char('j'), false) | (KeyCode::Down, false) => {
                 h.selected = (h.selected + 1).min(entries.saturating_sub(1));
@@ -549,7 +843,7 @@ impl App {
                 let half = i32::from(self.detail_height / 2).max(1);
                 self.scroll_by(-half)
             }
-            (KeyCode::Char('?'), false) => self.view = View::Help,
+            (KeyCode::Char('?'), false) => self.focus = Focus::Transient(Transient::Help),
             _ => {}
         }
         None
@@ -561,19 +855,18 @@ impl App {
     }
 
     pub fn detail_lines(&self) -> Vec<DiffLine> {
-        match self.current_row() {
-            Some(row) => match (self.pairing_at(row), self.artefact_at(row)) {
-                (Some(p), _) => inline_view(p),
-                (_, Some(a)) => a.lines(),
-                _ => Vec::new(),
-            },
-            None => Vec::new(),
+        let Some(row) = self.current_row() else {
+            return Vec::new();
+        };
+        if let Some((_, m)) = self.scenario_at(row) {
+            return scenario_view(m);
+        }
+        match (self.pairing_at(row), self.artefact_at(row)) {
+            (Some(p), _) => inline_view(p),
+            (_, Some(a)) => a.lines(),
+            _ => Vec::new(),
         }
     }
-}
-
-pub fn artefact_hash(a: &crate::review::ArtefactReview) -> u64 {
-    text_hash(a.artefact.after.as_deref().unwrap_or(""))
 }
 
 /// Archived versions oldest first, then the version under review as

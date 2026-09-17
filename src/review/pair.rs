@@ -8,9 +8,42 @@ use super::findings::{collisions, Finding, FindingKind, Location, Summary};
 use super::history::HistoryEntry;
 use super::normalize::{normalized, text_hash};
 use super::ArtefactReview;
-use crate::model::{Canon, Change, DeltaKind, DeltaSpec, Requirement};
-use crate::state::ItemState;
+use crate::model::{Canon, Change, DeltaKind, DeltaSpec, Requirement, Scenario};
+use crate::state::{item_key, ItemState, Note};
 use serde::Serialize;
+use std::collections::BTreeMap;
+
+/// A note together with the anchor it hangs on and whether that anchor's
+/// text has moved since the note was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AnchoredNote {
+    /// `None` when the note is on the requirement itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenario: Option<String>,
+    pub text: String,
+    pub outdated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+impl AnchoredNote {
+    fn new(scenario: Option<String>, note: Note, anchor_hash: u64) -> AnchoredNote {
+        AnchoredNote {
+            scenario,
+            outdated: note.is_outdated(anchor_hash),
+            text: note.text,
+            at: note.at,
+        }
+    }
+
+    /// ` # <scenario>`, or nothing for a note on the requirement.
+    pub fn anchor_suffix(&self) -> String {
+        self.scenario
+            .as_ref()
+            .map(|s| format!(" # {s}"))
+            .unwrap_or_default()
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Pairing {
@@ -25,11 +58,19 @@ pub struct Pairing {
     pub findings: Vec<Finding>,
     pub history: Vec<HistoryEntry>,
     pub state: ItemState,
+    /// Every note under this requirement, its own first. Filled in by the
+    /// caller that owns the store.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<AnchoredNote>,
 }
 
 impl Pairing {
     pub fn key(&self) -> String {
-        format!("{}/{}", self.capability, self.name)
+        item_key(&self.capability, &self.name, None)
+    }
+
+    pub fn scenario_key(&self, scenario: &str) -> String {
+        item_key(&self.capability, &self.name, Some(scenario))
     }
 
     pub fn location(&self) -> Location {
@@ -47,6 +88,67 @@ impl Pairing {
         text_hash(&side.map(requirement_text).unwrap_or_default())
     }
 
+    /// The normalized text of one scenario, after side when it has one,
+    /// so a dropped scenario still reads as the canon text it was.
+    pub fn scenario_text(&self, scenario: &str) -> Option<String> {
+        let find = |r: &Requirement| r.scenarios.iter().find(|s| s.name == scenario).cloned();
+        let s = self
+            .after
+            .as_ref()
+            .and_then(find)
+            .or_else(|| self.before.as_ref().and_then(find))?;
+        Some(scenario_text(&s))
+    }
+
+    /// What a note on this anchor is hashed against. An approval hashes the
+    /// whole requirement; a note hashes only what it is about, so editing
+    /// one scenario leaves the notes on its siblings alone.
+    pub fn anchor_hash(&self, scenario: Option<&str>) -> u64 {
+        match scenario {
+            None => self.text_hash(),
+            Some(s) => text_hash(&self.scenario_text(s).unwrap_or_default()),
+        }
+    }
+
+    /// Read this requirement's notes and its scenarios' out of a store's
+    /// items, in row order.
+    pub fn refresh_notes(&mut self, items: &BTreeMap<String, ItemState>) {
+        let note_at = |key: &str| items.get(key).and_then(|i| i.note.clone());
+        let mut notes = Vec::new();
+        if let Some(n) = note_at(&self.key()) {
+            notes.push(AnchoredNote::new(None, n, self.anchor_hash(None)));
+        }
+        let names: Vec<String> = self
+            .diff
+            .scenarios
+            .iter()
+            .map(|s| s.name().to_string())
+            .collect();
+        for name in names {
+            if let Some(n) = note_at(&self.scenario_key(&name)) {
+                let hash = self.anchor_hash(Some(&name));
+                notes.push(AnchoredNote::new(Some(name), n, hash));
+            }
+        }
+        self.notes = notes;
+    }
+
+    /// The note on the requirement itself.
+    pub fn note(&self) -> Option<&AnchoredNote> {
+        self.notes.iter().find(|n| n.scenario.is_none())
+    }
+
+    pub fn scenario_note(&self, scenario: &str) -> Option<&AnchoredNote> {
+        self.notes
+            .iter()
+            .find(|n| n.scenario.as_deref() == Some(scenario))
+    }
+
+    /// The `✎` marker's question: is there a note anywhere under here.
+    pub fn has_note(&self) -> bool {
+        !self.notes.is_empty()
+    }
+
     pub fn worst_severity(&self) -> Option<super::Severity> {
         self.findings.iter().map(|f| f.severity).max()
     }
@@ -55,12 +157,20 @@ impl Pairing {
 pub fn requirement_text(req: &Requirement) -> String {
     let mut out = normalized(&req.body);
     for s in &req.scenarios {
-        out.push_str("\n#### Scenario: ");
-        out.push_str(&s.name);
         out.push('\n');
-        out.push_str(&normalized(&s.body));
+        out.push_str(&scenario_text(s));
     }
     out
+}
+
+/// One scenario's normalized text, heading included, as it reads inside
+/// `requirement_text`.
+pub fn scenario_text(scenario: &Scenario) -> String {
+    format!(
+        "#### Scenario: {}\n{}",
+        scenario.name,
+        normalized(&scenario.body)
+    )
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -219,6 +329,7 @@ fn pair_entry(
         findings,
         history: Vec::new(),
         state: ItemState::default(),
+        notes: Vec::new(),
     }
 }
 
@@ -303,6 +414,18 @@ pub fn inline_view(p: &Pairing) -> Vec<DiffLine> {
         ));
         lines.extend(s.lines().iter().cloned());
     }
+    lines
+}
+
+/// One scenario of the detail pane: its heading, then its diff lines.
+pub fn scenario_view(scenario: &ScenarioMatch) -> Vec<DiffLine> {
+    let mut lines = vec![DiffLine::plain(
+        scenario.heading_kind(),
+        LineRole::Scenario,
+        format!("Scenario: {}", scenario.name()),
+    )];
+    lines.push(DiffLine::blank());
+    lines.extend(scenario.lines().iter().cloned());
     lines
 }
 

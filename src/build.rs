@@ -321,6 +321,7 @@ pub fn attach_state(
         }
         for p in change.pairings_mut() {
             p.state = store.get(&p.key());
+            p.refresh_notes(&store.state.items);
         }
         stores.insert(change.name.clone(), store);
     }

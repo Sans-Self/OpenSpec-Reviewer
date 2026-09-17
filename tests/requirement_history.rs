@@ -8,7 +8,7 @@ use common::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use openspec_reviewer::build::build_review;
 use openspec_reviewer::model::DeltaKind;
-use openspec_reviewer::render::tui::{App, View};
+use openspec_reviewer::render::tui::{App, Focus};
 use openspec_reviewer::render::{json, text};
 use openspec_reviewer::review::{collect_history, FindingKind, Location};
 use openspec_reviewer::source::{load_archives, ChangeSource, Source};
@@ -88,7 +88,7 @@ fn history_comes_from_archived_changes__never_touched() {
     let mut app = app_for(&repo);
     assert!(app.current_pairing().unwrap().history.is_empty());
     app.handle_key(key(KeyCode::Char('H')));
-    assert!(matches!(app.view, View::History(_)));
+    assert!(app.history_state().is_some());
     let lines = app.history_lines();
     assert!(
         lines.iter().any(|l| l.text().contains("New body.")),
@@ -167,9 +167,7 @@ fn the_history_view_is_a_list_and_a_version() {
     let mut app = app_for(&repo);
     let cursor = app.cursor;
     app.handle_key(key(KeyCode::Char('H')));
-    let View::History(h) = &app.view else {
-        panic!("history view opens")
-    };
+    let h = app.history_state().expect("history view opens");
     assert_eq!(h.selected, 2, "newest entry (current) selected");
     assert!(app
         .history_lines()
@@ -195,7 +193,7 @@ fn the_history_view_is_a_list_and_a_version() {
     );
 
     app.handle_key(key(KeyCode::Esc));
-    assert_eq!(app.view, View::Main);
+    assert_eq!(app.focus, Focus::Browsing);
     assert_eq!(app.cursor, cursor);
     assert!(!app.quit);
 }

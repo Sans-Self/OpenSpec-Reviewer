@@ -17,12 +17,78 @@ pub struct Approval {
     pub at: String,
 }
 
+/// One free-text note, on a requirement or on one of its scenarios,
+/// together with the text it was written about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "NoteRepr")]
+pub struct Note {
+    pub text: String,
+    /// Absent in a note an older state file held as a bare string, which
+    /// therefore never reads as outdated until it is next saved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_hash: Option<u64>,
+    /// RFC 3339.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+/// What a state file may hold for a note: today's record, or the bare
+/// string every file written before notes carried a hash holds.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum NoteRepr {
+    Full {
+        text: String,
+        #[serde(default)]
+        text_hash: Option<u64>,
+        #[serde(default)]
+        at: Option<String>,
+    },
+    Bare(String),
+}
+
+impl From<NoteRepr> for Note {
+    fn from(repr: NoteRepr) -> Note {
+        match repr {
+            NoteRepr::Full {
+                text,
+                text_hash,
+                at,
+            } => Note {
+                text,
+                text_hash,
+                at,
+            },
+            NoteRepr::Bare(text) => Note {
+                text,
+                text_hash: None,
+                at: None,
+            },
+        }
+    }
+}
+
+impl Note {
+    pub fn new(text: String, anchor_hash: u64) -> Note {
+        Note {
+            text,
+            text_hash: Some(anchor_hash),
+            at: Some(time::now_rfc3339()),
+        }
+    }
+
+    /// The anchor's text has moved since the note was written.
+    pub fn is_outdated(&self, anchor_hash: u64) -> bool {
+        self.text_hash.is_some_and(|h| h != anchor_hash)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved: Option<Approval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
+    pub note: Option<Note>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -92,6 +158,24 @@ pub fn state_home() -> Option<PathBuf> {
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| directories::BaseDirs::new().map(|d| d.home_dir().join(".local").join("state")))
+}
+
+/// The key an item is stored under: `<capability>/<requirement>` for a
+/// requirement, `<capability>/<requirement>#<scenario>` for one of its
+/// scenarios. `#` is the separator plain output already prints.
+pub fn item_key(capability: &str, requirement: &str, scenario: Option<&str>) -> String {
+    match scenario {
+        None => format!("{capability}/{requirement}"),
+        Some(s) => format!("{capability}/{requirement}#{s}"),
+    }
+}
+
+/// The anchor a key names: everything before the `#`, then the scenario.
+pub fn split_key(key: &str) -> (&str, Option<&str>) {
+    match key.split_once('#') {
+        Some((requirement, scenario)) => (requirement, Some(scenario)),
+        None => (key, None),
+    }
 }
 
 /// `<home>/openspec-reviewer/<repo>/<change>.json`.
@@ -180,9 +264,19 @@ impl Store {
         })
     }
 
-    pub fn set_note(&mut self, key: &str, note: Option<String>) -> Result<ItemState, StateError> {
+    /// Store a note against `anchor_hash`, the hash of the text it is
+    /// written about; an empty note removes it.
+    pub fn set_note(
+        &mut self,
+        key: &str,
+        note: Option<String>,
+        anchor_hash: u64,
+    ) -> Result<ItemState, StateError> {
         self.update(key, |item| {
-            item.note = note.filter(|n| !n.trim().is_empty());
+            item.note = note
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .map(|n| Note::new(n, anchor_hash));
         })
     }
 }
