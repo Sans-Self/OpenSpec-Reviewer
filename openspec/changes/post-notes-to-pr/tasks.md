@@ -42,10 +42,10 @@
 
 ## 6. Tests and docs
 
-- [ ] 6.1 Tests titled by requirement with a stub `gh` on `PATH` that
+- [x] 6.1 Tests titled by requirement with a stub `gh` on `PATH` that
       records the request it received: the prompt appears and does not
       appear, the payload anchors a requirement, a scenario and an
       artefact note, the body-only retry, the failure message, and the
       posted stamp round-trips through the state file.
-- [ ] 6.2 README: the quit prompt under the `gh` source.
-- [ ] 6.3 `clippy` and `rustfmt` clean.
+- [x] 6.2 README: the quit prompt under the `gh` source.
+- [x] 6.3 `clippy` and `rustfmt` clean.
