@@ -184,10 +184,11 @@ display mode.
 The tool MUST bind: `j`/`k` and arrows to move in the list, `Tab` to
 switch pane focus, `n`/`p` to jump to the next and previous row with a
 finding, `Space` to fold and unfold a requirement's scenarios, `a` to
-toggle approval, `e` to write a note, `H` to open history, `m` to cycle
-display mode, `?` for a help overlay, `q` and `Esc` to quit. `a` on a
-scenario row MUST toggle its parent requirement. `n` and `p` MUST unfold
-a requirement they land inside. The help overlay lists every binding.
+toggle approval, `e` to write a note, `N` to open the notes panel, `H`
+to open history, `m` to cycle display mode, `?` for a help overlay, `q`
+and `Esc` to quit. `a` on a scenario row MUST toggle its parent
+requirement. `n` and `p` MUST unfold a requirement they land inside.
+The help overlay lists every binding.
 
 #### Scenario: Jump to next finding
 
