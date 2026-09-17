@@ -680,8 +680,21 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
 }
 
 fn draw_help(frame: &mut Frame, area: Rect, palette: Palette) {
+    // The box fits its longest line, so no binding is cut; on a terminal
+    // narrower than that the lines wrap instead.
+    let key_column = BINDINGS
+        .iter()
+        .map(|(k, _)| k.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 2;
+    let longest = BINDINGS
+        .iter()
+        .map(|(_, what)| key_column + what.chars().count())
+        .max()
+        .unwrap_or(0);
+    let width = (longest as u16 + 4).min(area.width);
     let height = (BINDINGS.len() as u16 + 4).min(area.height);
-    let width = 64.min(area.width);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -692,7 +705,7 @@ fn draw_help(frame: &mut Frame, area: Rect, palette: Palette) {
         .iter()
         .map(|(k, what)| {
             Line::from(vec![
-                Span::styled(format!("{k:<30}"), palette.heading()),
+                Span::styled(format!("{k:<key_column$}"), palette.heading()),
                 Span::raw(*what),
             ])
         })
@@ -705,6 +718,7 @@ fn draw_help(frame: &mut Frame, area: Rect, palette: Palette) {
     frame.render_widget(Clear, popup);
     frame.render_widget(
         Paragraph::new(Text::from(lines))
+            .wrap(Wrap { trim: false })
             .block(Block::default().borders(Borders::ALL).title("keys")),
         popup,
     );

@@ -257,8 +257,9 @@ fn keys_follow_vi_and_arrow_conventions__help() {
     app.handle_key(key(KeyCode::Char('?')));
     assert_eq!(app.focus, Focus::Transient(Transient::Help));
     let screen = render(&mut app, 160, 30);
-    for (k, _) in openspec_reviewer::render::tui::BINDINGS {
+    for (k, what) in openspec_reviewer::render::tui::BINDINGS {
         assert!(screen.contains(k), "help lacks {k}: {screen}");
+        assert!(screen.contains(what), "help cuts {k}: {screen}");
     }
     app.handle_key(key(KeyCode::Char('x')));
     assert_eq!(app.focus, Focus::Browsing);
