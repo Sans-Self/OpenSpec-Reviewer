@@ -3,7 +3,7 @@ name: opsx-reviewer-workflow
 description: How to work with openspec-reviewer in a repository that has an openspec/ directory and the openspec-reviewer binary: when to run the review and the lint, what each finding kind means, how to write a spec: citation, and which opsx-reviewer skill handles a finding that needs judgment.
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
-  generatedBy: openspec-reviewer 0.1.0
+  generatedBy: openspec-reviewer 0.2.0
   checksum: ecbd4ed41bda2b89
 ---
 Use this skill in any repository with an `openspec/` directory and an

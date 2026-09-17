@@ -3,7 +3,7 @@ name: opsx-reviewer-crossref
 description: Judge the sibling requirements an OpenSpec change puts in question, quote archived decisions, and draft MODIFIED entries into the change on confirmation.
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
-  generatedBy: openspec-reviewer 0.1.0
+  generatedBy: openspec-reviewer 0.2.0
   checksum: c5a817eb9433738e
 ---
 Judge the siblings a change puts in question. This skill edits only the

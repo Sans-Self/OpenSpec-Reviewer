@@ -3,7 +3,7 @@ name: opsx-reviewer-define
 description: Turn openspec-reviewer's recurring undefined terms into a drafted definitions delta in a new change. Writes under openspec/changes/ on confirmation.
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
-  generatedBy: openspec-reviewer 0.1.0
+  generatedBy: openspec-reviewer 0.2.0
   checksum: 232c3ca40d0a63c7
 ---
 Turn the lint's recurring undefined terms into a drafted glossary. This
