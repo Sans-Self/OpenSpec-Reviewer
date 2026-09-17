@@ -170,6 +170,7 @@ fn join_citations(
         &grammar,
     );
     let mut radius = blast_radius(&scanned.index, &this);
+    let ignored = config.ignored_citations();
     for p in review.pairings_mut() {
         let location = p.location();
         // The delta's own text, not the paired canon: a REMOVED entry has
@@ -184,6 +185,7 @@ fn join_citations(
             .unwrap_or_default();
         let dangling: Vec<Finding> = Grammar::literal(&entry_text)
             .into_iter()
+            .filter(|c| !ignored.contains(&c.to_string()))
             .filter_map(|c| match scanned.index.resolve(&c) {
                 Resolution::Resolved => None,
                 r => Some(Finding::new(

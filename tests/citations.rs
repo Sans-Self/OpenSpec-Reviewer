@@ -1028,3 +1028,147 @@ fn configuration_lives_beside_the_specs__init_documents_the_ignore_sections() {
     )
     .expect("the commented examples are valid configuration");
 }
+
+/// The `ignores` fixture with one spec citing evidence that does not
+/// resolve: a made-up capability and a path that is not there.
+fn quoting_repo() -> Repo {
+    let repo = Repo::from_fixture("ignores");
+    repo.append(
+        "openspec/specs/alpha/spec.md",
+        "\n### Requirement: An example is quoted\n\nThe grammar parses `spec:zeta § No such rule` and cites src/absent.rs.\n\n#### Scenario: In a sentence\n\n- **WHEN** the lint reads it\n- **THEN** it finds the example\n",
+    );
+    repo
+}
+
+fn ignore_evidence(repo: &Repo, entry: &str) {
+    repo.append(
+        "openspec/reviewer.toml",
+        &format!("\n[[lint.ignore_evidence]]\n{entry}\n"),
+    );
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__ignored_example_citation() {
+    let before = errors(&lint_in(&quoting_repo(), &[]));
+    assert!(
+        before.iter().any(|e| e.contains("zeta § No such rule")),
+        "{before:#?}"
+    );
+    let repo = quoting_repo();
+    ignore_evidence(
+        &repo,
+        "citation = \"zeta § No such rule\"\nreason   = \"a made-up capability in a scenario\"",
+    );
+    let after = errors(&lint_in(&repo, &[]));
+    assert!(
+        !after.iter().any(|e| e.contains("zeta § No such rule")),
+        "{after:#?}"
+    );
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__ignored_example_path() {
+    let before = errors(&lint_in(&quoting_repo(), &[]));
+    assert!(
+        before.iter().any(|e| e.contains("src/absent.rs")),
+        "{before:#?}"
+    );
+    let repo = quoting_repo();
+    ignore_evidence(
+        &repo,
+        "path   = \"src/absent.rs\"\nreason = \"a stand-in path in a scenario\"",
+    );
+    let after = errors(&lint_in(&repo, &[]));
+    assert!(
+        !after.iter().any(|e| e.contains("src/absent.rs")),
+        "{after:#?}"
+    );
+    assert!(
+        after.iter().any(|e| e.contains("zeta § No such rule")),
+        "a path entry does not silence a citation: {after:#?}"
+    );
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__evidence_entry_names_no_kind() {
+    let repo = quoting_repo();
+    ignore_evidence(&repo, "reason = \"nothing at all\"");
+    let out = lint_in(&repo, &[]);
+    assert!(stderr(&out).contains("ignore_evidence"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("none"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__evidence_entry_names_two_kinds() {
+    let repo = quoting_repo();
+    ignore_evidence(
+        &repo,
+        "path   = \"src/absent.rs\"\ncommit = \"deadbeef\"\nreason = \"two at once\"",
+    );
+    let out = lint_in(&repo, &[]);
+    assert!(stderr(&out).contains("src/absent.rs"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("deadbeef"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__evidence_entry_without_a_reason() {
+    let repo = quoting_repo();
+    ignore_evidence(&repo, "path = \"src/absent.rs\"");
+    let out = lint_in(&repo, &[]);
+    assert!(stderr(&out).contains("src/absent.rs"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("reason"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn a_dangling_ignore_entry_is_a_warning__ignored_path_now_exists() {
+    let repo = quoting_repo();
+    ignore_evidence(
+        &repo,
+        "path   = \"src/ledger.rs\"\nreason = \"was missing once\"",
+    );
+    let found = warnings(&lint_in(&repo, &[]));
+    let hit = found
+        .iter()
+        .find(|w| w.contains("src/ledger.rs"))
+        .unwrap_or_else(|| panic!("{found:#?}"));
+    assert!(hit.contains("silences nothing"), "{hit}");
+    assert!(hit.contains("openspec/reviewer.toml"), "{hit}");
+}
+
+/// The `ignores` fixture whose open change quotes a citation that does
+/// not resolve.
+fn quoting_delta_repo() -> Repo {
+    let repo = Repo::from_fixture("ignores");
+    repo.append(
+        "openspec/changes/ledger-freshness/specs/gamma/spec.md",
+        "\n#### Scenario: An example is quoted\n\n- **GIVEN** a delta quoting `spec:zeta § No such rule`\n- **WHEN** the tool reviews it\n- **THEN** the example is not a citation\n",
+    );
+    repo
+}
+
+#[test]
+fn an_ignore_entry_names_one_finding_and_its_reason__ignored_citation_during_a_review() {
+    let review = |repo: &Repo| {
+        stdout(&run_in(
+            repo.root(),
+            &["--findings-only", "change", "ledger-freshness"],
+        ))
+    };
+    assert!(
+        review(&quoting_delta_repo()).contains("dangling citation `zeta § No such rule`"),
+        "the review reports it without the entry"
+    );
+    let repo = quoting_delta_repo();
+    ignore_evidence(
+        &repo,
+        "citation = \"zeta § No such rule\"\nreason   = \"a made-up capability in a scenario\"",
+    );
+    assert!(
+        !review(&repo).contains("zeta § No such rule"),
+        "lint and change reach the same verdict: {}",
+        review(&repo)
+    );
+}
