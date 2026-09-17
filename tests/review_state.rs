@@ -110,7 +110,7 @@ fn a_requirement_or_a_scenario_can_carry_a_note() {
     let plain = text::render(
         &app.review,
         text::TextOptions {
-            colour: false,
+            palette: openspec_reviewer::render::colour::Palette::none(),
             findings_only: false,
         },
     );
@@ -209,7 +209,7 @@ fn an_approval_is_tied_to_the_text_it_approved() {
     let plain = text::render(
         &app.review,
         text::TextOptions {
-            colour: false,
+            palette: openspec_reviewer::render::colour::Palette::none(),
             findings_only: false,
         },
     );
@@ -533,7 +533,7 @@ fn plain_output_includes_state__export_a_scenario_s_note() {
     let plain = text::render(
         &app.review,
         text::TextOptions {
-            colour: false,
+            palette: openspec_reviewer::render::colour::Palette::none(),
             findings_only: false,
         },
     );
@@ -576,7 +576,7 @@ fn plain_output_includes_state__an_outdated_note_is_marked() {
     let plain = text::render(
         &app.review,
         text::TextOptions {
-            colour: false,
+            palette: openspec_reviewer::render::colour::Palette::none(),
             findings_only: false,
         },
     );

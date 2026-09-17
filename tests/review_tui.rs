@@ -166,6 +166,7 @@ fn the_detail_pane_follows_the_list_selection() {
     while !matches!(app.current_row(), Some(Row::Requirement { .. })) {
         app.handle_key(key(KeyCode::Char('j')));
     }
+    app.palette = Palette::none();
     let screen = render(&mut app, 140, 40);
     assert!(screen.contains("{+"), "word diff marks visible: {screen}");
     assert!(screen.contains("inherited"), "{screen}");
@@ -677,9 +678,9 @@ fn glossary_terms_are_marked_where_they_appear__term_inside_an_added_paragraph()
     let style = span_style(&styled, "group key");
     assert!(underlined(style), "marking composes with the diff");
     assert_eq!(
-        style.fg,
-        palette.added().fg,
-        "the term keeps the added style"
+        style.bg,
+        palette.added_span().bg,
+        "the term keeps the added tint"
     );
 }
 

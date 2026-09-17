@@ -265,7 +265,9 @@ pub fn run_in(root: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .current_dir(root)
         .env("XDG_STATE_HOME", root.join(".state"))
+        .env("XDG_CONFIG_HOME", root.join(".config"))
         .env_remove("NO_COLOR")
+        .env_remove("COLORFGBG")
         .output()
         .expect("binary runs")
 }

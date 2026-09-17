@@ -97,7 +97,7 @@ fn history_comes_from_archived_changes__never_touched() {
     let plain = text::render(
         &app.review,
         text::TextOptions {
-            colour: false,
+            palette: openspec_reviewer::render::colour::Palette::none(),
             findings_only: false,
         },
     );
@@ -212,7 +212,7 @@ fn history_is_available_in_plain_output() {
     let plain = text::render(
         &app.review,
         text::TextOptions {
-            colour: false,
+            palette: openspec_reviewer::render::colour::Palette::none(),
             findings_only: false,
         },
     );

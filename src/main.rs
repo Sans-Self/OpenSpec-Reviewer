@@ -2,6 +2,8 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::env::{Bash, Fish, Shells, Zsh};
 use clap_complete::{ArgValueCandidates, CompleteEnv, CompletionCandidate};
 use openspec_reviewer::build::{attach_state, build_review};
+use openspec_reviewer::render::colour::{Background, Palette, PaletteChoice};
+use openspec_reviewer::render::terminal::detect_background;
 use openspec_reviewer::render::{json, markdown, text, tui};
 use openspec_reviewer::source::complete;
 use openspec_reviewer::source::{ChangeSource, DiffSource, GhSource, GitSource, Source};
@@ -30,7 +32,7 @@ struct OutputFlags {
     /// Only the findings and the summary, one finding per line.
     #[arg(long, global = true)]
     findings_only: bool,
-    /// ANSI colour in plain text output.
+    /// ANSI colour in plain text output even when stdout is not a terminal.
     #[arg(long, global = true)]
     color: bool,
     /// Neither read nor write approvals and notes.
@@ -121,8 +123,20 @@ fn main() -> ExitCode {
     }
 }
 
+/// The palette for plain output: the user's choice, resolved against
+/// where stdout goes and `--color`, on the background `COLORFGBG` names.
+fn plain_palette(choice: PaletteChoice, force: bool) -> Palette {
+    let choice = choice.resolve(std::io::stdout().is_terminal(), force);
+    let background = match choice {
+        PaletteChoice::None => Background::Dark,
+        _ => detect_background(false),
+    };
+    Palette::new(choice, background)
+}
+
 fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     let root = std::env::current_dir()?;
+    let user = openspec_reviewer::config::user::read_user_config()?;
     let Some(command) = cli.source else {
         return Ok(2);
     };
@@ -136,7 +150,12 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
                 println!("{}", path.display());
                 Ok(0)
             }
-            None => run_lint(&root, coverage, cli.output.format),
+            None => run_lint(
+                &root,
+                coverage,
+                cli.output.format,
+                plain_palette(user.palette, cli.output.color),
+            ),
         };
     }
     if let Command::Skills { action } = command {
@@ -176,7 +195,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         && cli.output.format.is_none()
         && !cli.output.findings_only;
     if interactive {
-        tui::run(&root, built.review, built.stores)?;
+        tui::run(&root, built.review, built.stores, user.palette)?;
         return Ok(0);
     }
 
@@ -187,7 +206,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         Format::Text => text::render(
             &built.review,
             text::TextOptions {
-                colour: cli.output.color,
+                palette: plain_palette(user.palette, cli.output.color),
                 findings_only: cli.output.findings_only,
             },
         ),
@@ -200,6 +219,7 @@ fn run_lint(
     root: &std::path::Path,
     coverage: bool,
     format: Option<Format>,
+    palette: Palette,
 ) -> Result<u8, Box<dyn std::error::Error>> {
     use openspec_reviewer::citations::{coverage::coverage as ledger, lint, require_config};
     use openspec_reviewer::render::lint as render;
@@ -214,7 +234,7 @@ fn run_lint(
     match format {
         Some(Format::Json) => print!("{}", render::render_json(&report, ledger.as_ref())),
         _ => {
-            let out = render::render_text(&report, ledger.as_ref());
+            let out = render::render_text(&report, ledger.as_ref(), palette);
             std::io::stderr().write_all(out.stderr.as_bytes())?;
             print!("{}", out.stdout);
         }

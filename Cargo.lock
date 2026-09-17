@@ -566,6 +566,7 @@ dependencies = [
  "diffy",
  "directories",
  "ignore",
+ "libc",
  "ratatui",
  "regex",
  "serde",

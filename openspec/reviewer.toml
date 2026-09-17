@@ -133,3 +133,88 @@ reason = "Fold marker glyph, defined where it is used."
 term = "▾"
 in = ["review-tui"]
 reason = "Fold marker glyph, defined where it is used."
+
+[[definitions.ignore]]
+term = "[-"
+in = ["tui-color"]
+reason = "wdiff mark, defined in the plain output."
+
+[[definitions.ignore]]
+term = "{+"
+in = ["tui-color"]
+reason = "wdiff mark, defined in the plain output."
+
+[[definitions.ignore]]
+term = "lint"
+in = ["tui-color"]
+reason = "Subcommand name."
+
+[[definitions.ignore]]
+term = "Tab"
+in = ["tui-color"]
+reason = "Key name; the binding is defined in the keys requirement."
+
+[[definitions.ignore]]
+term = "!"
+in = ["tui-color"]
+reason = "Marker glyph, defined in the list requirement."
+
+[[definitions.ignore]]
+term = "√"
+in = ["tui-color"]
+reason = "Marker glyph, defined in the list requirement."
+
+[[definitions.ignore]]
+term = "15"
+in = ["tui-color"]
+reason = "A COLORFGBG index."
+
+[[definitions.ignore]]
+term = "COLORFGBG"
+in = ["tui-color"]
+reason = "Environment variable."
+
+[[definitions.ignore]]
+term = "OSC 11"
+in = ["tui-color"]
+reason = "Terminal control sequence."
+
+[[definitions.ignore]]
+term = "rgb:"
+in = ["tui-color"]
+reason = "The reply prefix of OSC 11."
+
+[[definitions.ignore]]
+term = "default"
+in = ["tui-color", "user-config", "review-tui"]
+reason = "Palette name, enumerated in Three palettes."
+
+[[definitions.ignore]]
+term = "accessible"
+in = ["tui-color", "user-config", "review-tui"]
+reason = "Palette name, enumerated in Three palettes."
+
+[[definitions.ignore]]
+term = "none"
+in = ["tui-color", "user-config", "review-tui"]
+reason = "Palette name, enumerated in Three palettes."
+
+[[definitions.ignore]]
+term = "none"
+in = ["plain-output"]
+reason = "Palette name, enumerated in tui-color § Three palettes."
+
+[[definitions.ignore]]
+term = "2"
+in = ["user-config"]
+reason = "Exit status."
+
+[[definitions.ignore]]
+term = "XDG_CONFIG_HOME"
+in = ["user-config"]
+reason = "Environment variable."
+
+[[definitions.ignore]]
+term = "pallete"
+in = ["user-config"]
+reason = "A deliberate typo in a scenario."

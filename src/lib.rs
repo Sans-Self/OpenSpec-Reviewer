@@ -6,6 +6,7 @@
 
 pub mod build;
 pub mod citations;
+pub mod config;
 pub mod drift;
 pub mod glossary;
 pub mod model;

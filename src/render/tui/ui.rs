@@ -18,7 +18,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui::Frame;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    let palette = Palette::from_env();
+    let palette = app.palette;
     let area = frame.area();
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -67,13 +67,17 @@ fn row_line(app: &App, row: &Row, prefix: &str, palette: Palette) -> Line<'stati
         ]),
         Row::Artefact { .. } => {
             let a = app.artefact_at(row).expect("artefact row");
-            let mark = a.state.status(a.text_hash()).mark();
+            let status = a.state.status(a.text_hash());
             Line::from(vec![
                 guide,
-                Span::raw(format!("{mark} ")),
-                Span::styled("· ", palette.muted()),
+                Span::styled(status.mark().to_string(), approval_style(status, palette)),
+                Span::styled(" · ", palette.muted()),
                 Span::raw(a.artefact.name.clone()),
-                Span::raw(format!(" {}", note_marker(a.state.note.is_some()))),
+                Span::raw(" "),
+                Span::styled(
+                    note_marker(a.state.note.is_some()).to_string(),
+                    palette.accent(),
+                ),
             ])
         }
         Row::Requirement { .. } => {
@@ -81,6 +85,7 @@ fn row_line(app: &App, row: &Row, prefix: &str, palette: Palette) -> Line<'stati
             let glyph_style = match p.kind {
                 crate::model::DeltaKind::Added => palette.added(),
                 crate::model::DeltaKind::Removed => palette.removed(),
+                crate::model::DeltaKind::Renamed { .. } => palette.accent(),
                 _ => palette.changed(),
             };
             let marker_style = match p.worst_severity() {
@@ -88,14 +93,17 @@ fn row_line(app: &App, row: &Row, prefix: &str, palette: Palette) -> Line<'stati
                 Some(Severity::Warning) => palette.warning(),
                 _ => Style::default(),
             };
+            let status = approval(p);
             Line::from(vec![
                 guide,
-                Span::raw(format!("{} {} ", fold_marker(app, row), approval(p).mark())),
+                Span::raw(format!("{} ", fold_marker(app, row))),
+                Span::styled(status.mark().to_string(), approval_style(status, palette)),
+                Span::raw(" "),
                 Span::styled(format!("{} ", p.kind.glyph()), glyph_style),
                 Span::raw(p.name.clone()),
                 Span::raw(" "),
                 Span::styled(finding_marker(p).to_string(), marker_style),
-                Span::raw(note_marker(p.has_note()).to_string()),
+                Span::styled(note_marker(p.has_note()).to_string(), palette.accent()),
             ])
         }
         Row::Scenario { .. } => {
@@ -125,7 +133,10 @@ fn row_line(app: &App, row: &Row, prefix: &str, palette: Palette) -> Line<'stati
                 Span::raw(m.name().to_string()),
                 Span::raw(" "),
                 Span::styled(marker.to_string(), marker_style),
-                Span::raw(note_marker(p.scenario_note(m.name()).is_some()).to_string()),
+                Span::styled(
+                    note_marker(p.scenario_note(m.name()).is_some()).to_string(),
+                    palette.accent(),
+                ),
             ])
         }
     }
@@ -185,7 +196,7 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
         " items "
     };
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title))
+        .block(pane_block(title, app.pane == Pane::List, palette))
         .highlight_style(palette.selected());
     let mut state = ListState::default().with_selected(Some(app.cursor));
     frame.render_stateful_widget(list, area, &mut state);
@@ -196,10 +207,19 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
 /// synonym also takes the warning style, because a word that must change
 /// outranks how it changed.
 fn mark_style(mark: Mark, base: Style, palette: Palette) -> Style {
-    let underlined = base.add_modifier(Modifier::UNDERLINED);
     match mark {
-        Mark::Admitted => underlined,
-        Mark::Deprecated(_) => underlined.patch(palette.warning()),
+        Mark::Admitted => base.patch(palette.term()),
+        Mark::Deprecated(_) => base.patch(palette.synonym()),
+    }
+}
+
+/// The colour of an approval mark: approved, stale, or nothing for pending,
+/// which is the state every row starts in.
+fn approval_style(status: crate::state::ApprovalStatus, palette: Palette) -> Style {
+    match status {
+        crate::state::ApprovalStatus::Approved => palette.approved(),
+        crate::state::ApprovalStatus::Stale => palette.stale(),
+        _ => Style::default(),
     }
 }
 
@@ -245,7 +265,40 @@ fn occurrences_of<'a>(marks: Option<&'a Marks>, text: &str) -> Vec<Occurrence<'a
     marks.map(|m| m.occurrences(text)).unwrap_or_default()
 }
 
+/// A bordered pane. The focused one takes the accent, the other goes dim,
+/// so `Tab` shows where it went without colour too.
+fn pane_block<'a>(title: impl Into<Line<'a>>, focused: bool, palette: Palette) -> Block<'a> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(if focused {
+            palette.focus()
+        } else {
+            palette.unfocus()
+        })
+        .title(title)
+}
+
 pub fn styled_line(line: &DiffLine, palette: Palette, marks: Option<&Marks>) -> Line<'static> {
+    diff_line(line, palette, marks, None)
+}
+
+/// `styled_line` padded with spaces to `width`, so a tinted line paints
+/// the pane across and not just under its words.
+pub fn styled_line_wide(
+    line: &DiffLine,
+    palette: Palette,
+    marks: Option<&Marks>,
+    width: u16,
+) -> Line<'static> {
+    diff_line(line, palette, marks, Some(usize::from(width)))
+}
+
+fn diff_line(
+    line: &DiffLine,
+    palette: Palette,
+    marks: Option<&Marks>,
+    pad_to: Option<usize>,
+) -> Line<'static> {
     if line.spans.is_empty() {
         return Line::raw("");
     }
@@ -269,26 +322,39 @@ pub fn styled_line(line: &DiffLine, palette: Palette, marks: Option<&Marks>) -> 
     } else {
         Style::default()
     };
+    // With colour the tint says what the wdiff marks say without it.
+    let marks_on = !palette.colour();
     let mut spans = vec![glyph];
     let mut at = 0;
     for s in &line.spans {
         let (prefix, suffix, style) = match (line.kind, s.mark) {
-            (ParaKind::Changed, SpanMark::Removed) => ("[-", "-]", palette.removed()),
-            (ParaKind::Changed, SpanMark::Added) => ("{+", "+}", palette.added()),
-            (ParaKind::Added, _) => ("", "", palette.added()),
-            (ParaKind::Removed, _) => ("", "", palette.removed()),
+            (ParaKind::Changed, SpanMark::Removed) => ("[-", "-]", palette.removed_span()),
+            (ParaKind::Changed, SpanMark::Added) => ("{+", "+}", palette.added_span()),
+            (ParaKind::Added, _) => ("", "", palette.added_span()),
+            (ParaKind::Removed, _) => ("", "", palette.removed_span()),
             (ParaKind::Separator, _) => ("", "", palette.muted()),
             _ => ("", "", base),
         };
         let style = style.patch(base);
-        if !prefix.is_empty() {
+        if marks_on && !prefix.is_empty() {
             spans.push(Span::styled(prefix.to_string(), style));
         }
         spans.extend(marked_spans(&s.text, at, &occurrences, style, palette));
-        if !suffix.is_empty() {
+        if marks_on && !suffix.is_empty() {
             spans.push(Span::styled(suffix.to_string(), style));
         }
         at += s.text.len();
+    }
+    let tint = match line.kind {
+        ParaKind::Added if palette.colour() => Some(palette.added_span()),
+        ParaKind::Removed if palette.colour() => Some(palette.removed_span()),
+        _ => None,
+    };
+    if let (Some(tint), Some(width)) = (tint, pad_to) {
+        let used: usize = spans.iter().map(|s| s.width()).sum();
+        if used < width {
+            spans.push(Span::styled(" ".repeat(width - used), tint));
+        }
     }
     Line::from(spans)
 }
@@ -398,7 +464,9 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
         match app.mode {
             DetailMode::Inline => {
                 let lines = app.detail_lines();
-                vp.extend(lines.len(), |i| styled_line(&lines[i], palette, marks));
+                vp.extend(lines.len(), |i| {
+                    styled_line_wide(&lines[i], palette, marks, width)
+                });
             }
             DetailMode::SideBySide => {
                 side_by_side(app.detail_lines(), width, palette, marks, &mut vp)
@@ -536,8 +604,8 @@ fn side_by_side(
         let left = l.side(SpanMark::Added);
         let right = l.side(SpanMark::Removed);
         let style_for = |present: bool| match (l.kind, present) {
-            (ParaKind::Added, true) => palette.added(),
-            (ParaKind::Removed, true) => palette.removed(),
+            (ParaKind::Added, true) => palette.added_span(),
+            (ParaKind::Removed, true) => palette.removed_span(),
             (ParaKind::Changed, true) => palette.changed(),
             _ => Style::default(),
         };
@@ -593,7 +661,7 @@ fn draw_detail(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
         _ => None,
     };
     let mut paragraph = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title(title))
+        .block(pane_block(title, app.pane == Pane::Detail, palette))
         .scroll((app.scroll, 0));
     if let Some(w) = wrap {
         paragraph = paragraph.wrap(w);
@@ -641,7 +709,10 @@ fn draw_history(frame: &mut Frame, app: &App, left: Rect, right: Rect, palette: 
     let marks = app.marks();
     let lines = app.history_lines();
     let mut vp = Viewport::new(h.scroll, right.height.saturating_sub(2), true);
-    vp.extend(lines.len(), |i| styled_line(&lines[i], palette, marks));
+    let width = right.width.saturating_sub(2);
+    vp.extend(lines.len(), |i| {
+        styled_line_wide(&lines[i], palette, marks, width)
+    });
     let paragraph = Paragraph::new(vp.text())
         .block(Block::default().borders(Borders::ALL).title(title))
         .wrap(Wrap { trim: false })
@@ -650,6 +721,16 @@ fn draw_history(frame: &mut Frame, app: &App, left: Rect, right: Rect, palette: 
 }
 
 pub fn status_text(app: &App) -> String {
+    status_line(app, Palette::none())
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect()
+}
+
+/// The status bar as spans, a count coloured only when it is not zero:
+/// a zero is the good news and needs no ink.
+fn status_line(app: &App, palette: Palette) -> Line<'static> {
     let (approved, total) = app.approval_counts();
     let (e, w, n) = app.finding_counts();
     let mode = match (app.history_state(), app.note_edit(), app.notes_state()) {
@@ -661,20 +742,33 @@ pub fn status_text(app: &App) -> String {
         (_, _, Some(_)) => "notes",
         _ => app.mode.label(),
     };
-    let mut s = format!(
-        " {}  {approved}/{total} approved  {e} errors {w} warnings {n} notes  mode: {mode}  ? help",
-        app.current_change_name()
-    );
+    let count = |value: usize, word: &str, style: Style| {
+        Span::styled(
+            format!("{value} {word}"),
+            if value > 0 { style } else { Style::default() },
+        )
+    };
+    let mut spans = vec![
+        Span::raw(format!(
+            " {}  {approved}/{total} approved  ",
+            app.current_change_name()
+        )),
+        count(e, "errors", palette.error()),
+        Span::raw(" "),
+        count(w, "warnings", palette.warning()),
+        Span::raw(" "),
+        count(n, "notes", palette.note()),
+        Span::raw(format!("  mode: {mode}  ? help")),
+    ];
     if let Some(m) = &app.message {
-        s.push_str("  ");
-        s.push_str(m);
+        spans.push(Span::raw(format!("  {m}")));
     }
-    s
+    Line::from(spans)
 }
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
     frame.render_widget(
-        Paragraph::new(status_text(app)).style(palette.selected()),
+        Paragraph::new(status_line(app, palette)).style(palette.selected()),
         area,
     );
 }

@@ -95,6 +95,17 @@ errors, `1` on warnings, `0` otherwise.
 Approvals and notes live under `$XDG_STATE_HOME/openspec-reviewer/`, per
 repository and change. `--no-state` ignores them.
 
+Colour follows the terminal: the view, plain text and `lint` are coloured
+when stdout is a terminal and bare when piped; `--color` forces the codes
+on for a pager, `NO_COLOR` forces them off. Added and removed text is
+tinted by background and keeps a modifier underneath, so it reads without
+colour too. The palette adapts to a light or dark background, read from
+`COLORFGBG` or asked of the terminal once at startup. Settings that
+belong to you rather than to the repository live in
+`$XDG_CONFIG_HOME/openspec-reviewer/config.toml`; its one key so far is
+`palette`, one of `default`, `accessible` (blue and orange in place of
+green and red) or `none`.
+
 Reviewing a pull request through `gh <pr>` ends with the notes offered to
 it: quitting with a note that has not been posted asks first, `y` posts
 and leaves, `n` leaves without. One review with the event `COMMENT` goes

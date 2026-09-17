@@ -750,7 +750,12 @@ fn a_term_opens_with_a_binding_line__this_repositorys_own_terms() {
     .unwrap();
     let canon = canon_of("definitions", &text);
     let glossary = Glossary::build(&canon, &[], "definitions");
-    assert_eq!(glossary.terms.len(), 5);
+    for name in ["canon", "snapshot", "source", "pairing", "finding"] {
+        assert!(
+            glossary.terms.iter().any(|t| t.name == name),
+            "`{name}` is a term"
+        );
+    }
     for term in &glossary.terms {
         assert!(term.binding.is_bound(), "`{}` is unbound", term.name);
     }

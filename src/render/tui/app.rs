@@ -3,6 +3,7 @@
 
 use crate::glossary::Marks;
 use crate::render::approval;
+use crate::render::colour::Palette;
 use crate::review::pair::{diff_versions, version_lines};
 use crate::review::{inline_view, scenario_view, DiffLine, Pairing, Review, ScenarioMatch};
 use crate::state::{ApprovalStatus, ItemState, Store};
@@ -208,6 +209,8 @@ pub struct App {
     /// Requirements whose scenarios are showing. Folded is the default, so
     /// an empty set is a view that has just opened.
     pub unfolded: BTreeSet<Anchor>,
+    /// Resolved once before the first draw; tests set it directly.
+    pub palette: Palette,
     /// The glossary's matchers, compiled once: the glossary cannot change
     /// while the view is open.
     marks: Marks,
@@ -319,6 +322,7 @@ impl App {
             detail_height: 20,
             definitions_open: BTreeSet::new(),
             unfolded: BTreeSet::new(),
+            palette: Palette::from_env(),
             marks,
             detail: DetailCache::default(),
         };

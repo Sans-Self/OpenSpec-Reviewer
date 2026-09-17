@@ -47,6 +47,8 @@ is dark or light, so `Yellow` warnings disappear on white.
 
 ### Modified Capabilities
 
+- `definitions`: the term `palette`.
+
 - `review-tui`: "Colour is never the only signal" names the rule that a
   tinted span keeps a modifier underneath it.
 - `plain-output`: "Plain text uses no escape codes unless asked" becomes

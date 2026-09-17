@@ -8,8 +8,10 @@ pub use app::{
     App, DetailMode, Effect, Focus, HistoryMode, Modal, NoteEdit, NoteRow, NotesState, Pane,
     QuitPrompt, Row, Transient, BINDINGS,
 };
-pub use ui::{draw, status_text, styled_line};
+pub use ui::{draw, status_text, styled_line, styled_line_wide};
 
+use crate::render::colour::{Background, Palette, PaletteChoice};
+use crate::render::terminal::detect_background;
 use crate::review::Review;
 use crate::state::Store;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -34,10 +36,24 @@ fn install_signal_flag() -> io::Result<Arc<AtomicBool>> {
 
 /// Run the view until the user quits. `ratatui::init` installs a panic
 /// hook that restores the terminal before the message prints.
-pub fn run(root: &Path, review: Review, stores: BTreeMap<String, Store>) -> io::Result<()> {
+pub fn run(
+    root: &Path,
+    review: Review,
+    stores: BTreeMap<String, Store>,
+    palette: PaletteChoice,
+) -> io::Result<()> {
     let mut app = App::new(review, stores);
     let interrupted = install_signal_flag()?;
     let mut terminal = ratatui::try_init()?;
+    // Raw mode is on and nothing has been drawn: the one moment the
+    // terminal can be asked about its background without a keystroke
+    // getting mixed into the answer.
+    let choice = palette.resolve(true, false);
+    let background = match choice {
+        PaletteChoice::None => Background::Dark,
+        _ => detect_background(true),
+    };
+    app.palette = Palette::new(choice, background);
     let result = event_loop(root, &mut terminal, &mut app, &interrupted);
     ratatui::restore();
     result
