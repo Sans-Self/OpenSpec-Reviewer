@@ -5,7 +5,8 @@ mod tree;
 mod ui;
 
 pub use app::{
-    App, DetailMode, Effect, Focus, HistoryMode, Modal, NoteEdit, Pane, Row, Transient, BINDINGS,
+    App, DetailMode, Effect, Focus, HistoryMode, Modal, NoteEdit, NoteRow, NotesState, Pane, Row,
+    Transient, BINDINGS,
 };
 pub use ui::{draw, status_text, styled_line};
 

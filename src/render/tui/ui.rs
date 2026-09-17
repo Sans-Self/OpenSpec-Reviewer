@@ -36,6 +36,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_detail(frame, app, panes[1], palette);
     }
     draw_status(frame, app, vertical[1], palette);
+    if app.notes_state().is_some() {
+        draw_notes(frame, app, vertical[0], palette);
+    }
     match &app.focus {
         Focus::Transient(Transient::Help) => draw_help(frame, area, palette),
         Focus::Modal(Modal::Note(edit)) => draw_note(frame, edit, panes[1], palette),
@@ -642,12 +645,13 @@ fn draw_history(frame: &mut Frame, app: &App, left: Rect, right: Rect, palette: 
 pub fn status_text(app: &App) -> String {
     let (approved, total) = app.approval_counts();
     let (e, w, n) = app.finding_counts();
-    let mode = match (app.history_state(), app.note_edit()) {
-        (Some(h), _) => match h.mode {
+    let mode = match (app.history_state(), app.note_edit(), app.notes_state()) {
+        (Some(h), _, _) => match h.mode {
             HistoryMode::Version => "history",
             HistoryMode::DiffToPrevious => "history diff",
         },
-        (_, Some(_)) => "note",
+        (_, Some(_), _) => "note",
+        (_, _, Some(_)) => "notes",
         _ => app.mode.label(),
     };
     let mut s = format!(
@@ -695,6 +699,66 @@ fn draw_help(frame: &mut Frame, area: Rect, palette: Palette) {
     frame.render_widget(
         Paragraph::new(Text::from(lines))
             .block(Block::default().borders(Borders::ALL).title("keys")),
+        popup,
+    );
+}
+
+/// The notes panel, over both panes: a note's first line needs the width,
+/// and the list behind it is not useful while the panel is up.
+fn draw_notes(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
+    let Some(state) = app.notes_state() else {
+        return;
+    };
+    let rows = app.note_rows();
+    let items: Vec<ListItem> = if rows.is_empty() {
+        vec![ListItem::new(Line::styled("no notes", palette.muted()))]
+    } else {
+        rows.iter()
+            .map(|r| {
+                let mut spans = vec![
+                    Span::styled(format!("{} ", r.label), palette.heading()),
+                    Span::raw(r.first_line.clone()),
+                ];
+                if r.outdated {
+                    spans.push(Span::styled(" (outdated)", palette.warning()));
+                }
+                ListItem::new(Line::from(spans))
+            })
+            .collect()
+    };
+    let title = format!("notes ({})", rows.len());
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_style(palette.selected());
+    let mut list_state = ListState::default().with_selected(Some(state.selected));
+    frame.render_widget(Clear, area);
+    frame.render_stateful_widget(list, area, &mut list_state);
+    if state.confirming {
+        draw_confirm_clear(frame, rows.len(), area, palette);
+    }
+}
+
+/// The one destructive key in the view asks, and says how much it is
+/// about to remove.
+fn draw_confirm_clear(frame: &mut Frame, count: usize, area: Rect, palette: Palette) {
+    let width = 52.min(area.width);
+    let height = 5.min(area.height);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    let plural = if count == 1 { "note" } else { "notes" };
+    let lines = vec![
+        Line::raw(format!("delete all {count} {plural} of this change?")),
+        Line::styled("approvals are kept", palette.muted()),
+        Line::styled("y clear, any other key cancel", palette.muted()),
+    ];
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .block(Block::default().borders(Borders::ALL).title("clear notes")),
         popup,
     );
 }

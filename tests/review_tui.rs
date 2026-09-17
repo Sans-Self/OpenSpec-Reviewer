@@ -267,6 +267,26 @@ fn keys_follow_vi_and_arrow_conventions__help() {
 }
 
 #[test]
+fn keys_follow_vi_and_arrow_conventions__the_notes_panel() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    app.handle_key(key(KeyCode::Char('N')));
+    assert!(app.notes_state().is_some(), "`N` opens the notes panel");
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(app.focus, Focus::Browsing);
+    app.handle_key(key(KeyCode::Char('?')));
+    let screen = render(&mut app, 120, 30);
+    assert!(
+        screen.contains("every note of the change"),
+        "the help lists `N`: {screen}"
+    );
+    assert!(
+        screen.contains("in the notes panel"),
+        "and the panel's own keys: {screen}"
+    );
+}
+
+#[test]
 fn colour_is_never_the_only_signal() {
     let palette = Palette::none();
     assert_eq!(palette.added().fg, None);
