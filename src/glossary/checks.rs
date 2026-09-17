@@ -7,7 +7,6 @@ use crate::model::{Canon, DeltaKind, DeltaSpec, Ignores, Requirement};
 use crate::review::pair::requirement_text;
 use crate::review::{Finding, FindingKind, Location, Pairing};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
 
 fn outside<'a>(
     canon: &'a Canon,
@@ -21,67 +20,38 @@ fn outside<'a>(
         .flat_map(|(c, reqs)| reqs.iter().map(move |r| (c.as_str(), r)))
 }
 
-/// The phrases that shield a deprecated synonym found inside them: every
-/// term name and admitted synonym of two or more words. A one-word phrase
-/// cannot contain a synonym, and admitting it here would let one term's
-/// admission silence another term's deprecation everywhere.
-fn shields(glossary: &Glossary) -> Vec<Matcher> {
-    glossary
-        .terms
-        .iter()
-        .flat_map(|t| t.names())
-        .filter(|p| p.split_whitespace().count() > 1)
-        .map(Matcher::new)
-        .collect()
-}
-
-/// The spans of `text` the shields cover, in the same offsets `Matcher`
-/// reports hits at.
-fn covered(shields: &[Matcher], text: &str) -> Vec<Range<usize>> {
-    shields.iter().flat_map(|s| s.ranges(text)).collect()
-}
-
-/// The shielded spans of each scenario: its body, then its name.
-type ScenarioShields = Vec<(Vec<Range<usize>>, Vec<Range<usize>>)>;
-
-/// Whether the synonym appears in `text` outside every phrase that
-/// contains it. The longest phrase wins.
-fn used(m: &Matcher, covered: &[Range<usize>], text: &str) -> bool {
-    m.ranges(text).into_iter().any(|hit| {
-        !covered
-            .iter()
-            .any(|c| c.start <= hit.start && hit.end <= c.end)
-    })
-}
-
 /// Deprecated synonyms in the pairings of the change under review, reported
 /// on the pairing and, for a scenario hit, at the scenario.
 pub fn deprecated_in_pairings(glossary: &Glossary, pairings: &[&Pairing]) -> Vec<Finding> {
-    let shields = shields(glossary);
+    let marks = glossary.marks();
     let mut out = Vec::new();
     for p in pairings
         .iter()
         .filter(|p| p.capability != glossary.capability)
     {
         let Some(after) = &p.after else { continue };
-        let body_shield = covered(&shields, &after.body);
-        let scenario_shields: ScenarioShields = after
+        let in_body = marks.live_deprecated(&after.body);
+        let in_scenarios: Vec<Vec<(&str, &str)>> = after
             .scenarios
             .iter()
-            .map(|s| (covered(&shields, &s.body), covered(&shields, &s.name)))
+            .map(|s| {
+                let mut both = marks.live_deprecated(&s.body);
+                both.extend(marks.live_deprecated(&s.name));
+                both
+            })
             .collect();
         for term in &glossary.terms {
             for synonym in &term.deprecated {
-                let m = Matcher::new(synonym);
+                let pair = (term.name.as_str(), synonym.as_str());
                 let kind = || FindingKind::UsesDeprecatedSynonym {
                     synonym: synonym.clone(),
                     term: term.name.clone(),
                 };
-                if used(&m, &body_shield, &after.body) {
+                if in_body.contains(&pair) {
                     out.push(Finding::new(kind(), p.location()));
                 }
-                for (s, (body, name)) in after.scenarios.iter().zip(&scenario_shields) {
-                    if used(&m, body, &s.body) || used(&m, name, &s.name) {
+                for (s, live) in after.scenarios.iter().zip(&in_scenarios) {
+                    if live.contains(&pair) {
                         out.push(Finding::new(
                             kind(),
                             Location {
@@ -108,18 +78,22 @@ pub struct CanonHit {
 }
 
 pub fn deprecated_in_canon(glossary: &Glossary, canon: &Canon) -> Vec<CanonHit> {
-    let shields = shields(glossary);
+    let marks = glossary.marks();
     let mut out = Vec::new();
     for (cap, req) in outside(canon, glossary) {
-        let body_shield = covered(&shields, &req.body);
-        let scenario_shields: ScenarioShields = req
+        let in_body = marks.live_deprecated(&req.body);
+        let in_scenarios: Vec<Vec<(&str, &str)>> = req
             .scenarios
             .iter()
-            .map(|s| (covered(&shields, &s.body), covered(&shields, &s.name)))
+            .map(|s| {
+                let mut both = marks.live_deprecated(&s.body);
+                both.extend(marks.live_deprecated(&s.name));
+                both
+            })
             .collect();
         for term in &glossary.terms {
             for synonym in &term.deprecated {
-                let m = Matcher::new(synonym);
+                let pair = (term.name.as_str(), synonym.as_str());
                 let hit = |scenario: Option<String>| CanonHit {
                     term: term.name.clone(),
                     synonym: synonym.clone(),
@@ -127,11 +101,11 @@ pub fn deprecated_in_canon(glossary: &Glossary, canon: &Canon) -> Vec<CanonHit> 
                     requirement: req.name.clone(),
                     scenario,
                 };
-                if used(&m, &body_shield, &req.body) {
+                if in_body.contains(&pair) {
                     out.push(hit(None));
                 }
-                for (s, (body, name)) in req.scenarios.iter().zip(&scenario_shields) {
-                    if used(&m, body, &s.body) || used(&m, name, &s.name) {
+                for (s, live) in req.scenarios.iter().zip(&in_scenarios) {
+                    if live.contains(&pair) {
                         out.push(hit(Some(s.name.clone())));
                     }
                 }

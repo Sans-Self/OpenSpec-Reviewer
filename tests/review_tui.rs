@@ -8,7 +8,10 @@ use common::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use openspec_reviewer::build::build_review;
 use openspec_reviewer::render::colour::Palette;
-use openspec_reviewer::render::tui::{App, DetailMode, Effect, Focus, Pane, Row, Transient};
+use openspec_reviewer::render::tui::{
+    styled_line, App, DetailMode, Effect, Focus, Pane, Row, Transient,
+};
+use openspec_reviewer::review::DiffLine;
 use openspec_reviewer::source::{ChangeSource, Source};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -274,7 +277,7 @@ fn colour_is_never_the_only_signal() {
         openspec_reviewer::review::LineRole::Body,
         "text",
     );
-    let styled = openspec_reviewer::render::tui::styled_line(&line, palette);
+    let styled = styled_line(&line, palette, None);
     let rendered: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         rendered.starts_with("+ "),
@@ -578,4 +581,132 @@ fn a_note_is_written_in_a_popup__keys_reach_the_popup() {
     assert!(!app.quit, "the view does not quit");
     app.handle_key(key(KeyCode::Backspace));
     assert_eq!(app.note_edit().map(|e| e.buffer.as_str()), Some(""));
+}
+
+// The shielding fixture already holds what these scenarios need: `group
+// key` with `rotation key` deprecated for it, the longer `PLC rotation
+// key` that contains the synonym, and `anchor`, deprecated and shielded
+// only by `lineage anchor`.
+fn marking_glossary() -> openspec_reviewer::glossary::Glossary {
+    let mut canon = openspec_reviewer::model::Canon::default();
+    canon.specs.insert(
+        "definitions".into(),
+        openspec_reviewer::model::parse_canon_spec(&fixture("shielding", "definitions.md")),
+    );
+    openspec_reviewer::glossary::Glossary::build(&canon, &[], "definitions")
+}
+
+fn body_line(kind: openspec_reviewer::review::ParaKind, text: &str) -> DiffLine {
+    DiffLine::plain(kind, openspec_reviewer::review::LineRole::Body, text)
+}
+
+/// The style of the span drawing exactly `text`, which is what marking a
+/// term produces: a span of its own, split out of the paragraph.
+fn span_style(line: &ratatui::text::Line<'static>, text: &str) -> ratatui::style::Style {
+    line.spans
+        .iter()
+        .find(|s| s.content.as_ref() == text)
+        .unwrap_or_else(|| {
+            let drawn: Vec<&str> = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            panic!("no span drawing {text:?}: {drawn:?}")
+        })
+        .style
+}
+
+fn underlined(style: ratatui::style::Style) -> bool {
+    style
+        .add_modifier
+        .contains(ratatui::style::Modifier::UNDERLINED)
+}
+
+#[test]
+fn glossary_terms_are_marked_where_they_appear__term_in_an_unchanged_paragraph() {
+    let glossary = marking_glossary();
+    let marks = glossary.marks();
+    let line = body_line(
+        openspec_reviewer::review::ParaKind::Equal,
+        "The holder signs with the group key before publishing.",
+    );
+    let styled = styled_line(&line, Palette::from_env(), Some(&marks));
+    assert!(
+        underlined(span_style(&styled, "group key")),
+        "an admitted name is underlined where it stands"
+    );
+}
+
+#[test]
+fn glossary_terms_are_marked_where_they_appear__term_inside_an_added_paragraph() {
+    let glossary = marking_glossary();
+    let marks = glossary.marks();
+    let palette = Palette::from_env();
+    let line = body_line(
+        openspec_reviewer::review::ParaKind::Added,
+        "A new holder receives the group key.",
+    );
+    let styled = styled_line(&line, palette, Some(&marks));
+    let drawn: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(drawn.starts_with("+ "), "the line keeps its glyph: {drawn}");
+    let style = span_style(&styled, "group key");
+    assert!(underlined(style), "marking composes with the diff");
+    assert_eq!(
+        style.fg,
+        palette.added().fg,
+        "the term keeps the added style"
+    );
+}
+
+#[test]
+fn glossary_terms_are_marked_where_they_appear__deprecated_synonym_in_the_text() {
+    let glossary = marking_glossary();
+    let marks = glossary.marks();
+    let palette = Palette::from_env();
+    let line = body_line(
+        openspec_reviewer::review::ParaKind::Equal,
+        "The reader resolves the anchor before trusting it.",
+    );
+    let styled = styled_line(&line, palette, Some(&marks));
+    let style = span_style(&styled, "anchor");
+    assert!(underlined(style), "a synonym is marked at least as a term");
+    assert_eq!(
+        style.fg,
+        palette.warning().fg,
+        "a deprecated synonym takes the warning style"
+    );
+}
+
+#[test]
+fn glossary_terms_are_marked_where_they_appear__synonym_inside_a_longer_term() {
+    let glossary = marking_glossary();
+    let marks = glossary.marks();
+    let palette = Palette::from_env();
+    let line = body_line(
+        openspec_reviewer::review::ParaKind::Equal,
+        "Rotation uses the PLC rotation key and nothing else.",
+    );
+    let styled = styled_line(&line, palette, Some(&marks));
+    assert!(
+        underlined(span_style(&styled, "PLC rotation key")),
+        "the whole name is one occurrence"
+    );
+    assert!(
+        styled
+            .spans
+            .iter()
+            .all(|s| s.style.fg != palette.warning().fg || s.content.as_ref().trim().is_empty()),
+        "the synonym inside a longer name is not marked as deprecated"
+    );
+}
+
+#[test]
+fn glossary_terms_are_marked_where_they_appear__marking_without_colour() {
+    let glossary = marking_glossary();
+    let marks = glossary.marks();
+    let line = body_line(
+        openspec_reviewer::review::ParaKind::Equal,
+        "The holder signs with the group key.",
+    );
+    let styled = styled_line(&line, Palette::none(), Some(&marks));
+    let style = span_style(&styled, "group key");
+    assert_eq!(style.fg, None, "no colour without colour");
+    assert!(underlined(style), "the underline is not a colour");
 }
