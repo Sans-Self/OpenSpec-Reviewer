@@ -59,6 +59,12 @@
             pkgs.git
             (openspecCli pkgs)
           ];
+
+          # openspec 1.6.0 ships telemetry on by default and routes it
+          # through edge.openspec.dev, which its own source says is "to
+          # avoid ad blockers". I hope they step on a sharp pebble, but
+          # at least they provide this option too.
+          DO_NOT_TRACK = "1";
         };
       });
 
