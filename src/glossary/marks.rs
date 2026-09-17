@@ -26,23 +26,29 @@ pub struct Occurrence<'a> {
 }
 
 /// A glossary with its matchers compiled. Compiling is the expensive part,
-/// so a caller reading many texts builds this once and reads with it.
-pub struct Marks<'a> {
-    names: Vec<(&'a Term, Matcher)>,
+/// so a caller reading many texts builds this once and reads with it. The
+/// terms are owned rather than borrowed, so a long-lived reader — the view,
+/// which holds one for the session — can keep the matchers next to the
+/// review they were built from.
+pub struct Marks {
+    terms: Vec<Term>,
+    names: Vec<(usize, Matcher)>,
     /// Names of two or more words, the only ones that can contain a
     /// synonym. Admitting a one-word name here would let one term's
     /// admission silence another term's deprecation everywhere.
     shields: Vec<Matcher>,
-    deprecated: Vec<(&'a Term, &'a str, Matcher)>,
+    deprecated: Vec<(usize, String, Matcher)>,
 }
 
 impl Glossary {
-    pub fn marks(&self) -> Marks<'_> {
+    pub fn marks(&self) -> Marks {
         Marks {
+            terms: self.terms.clone(),
             names: self
                 .terms
                 .iter()
-                .flat_map(|t| t.names().map(move |n| (t, Matcher::new(n))))
+                .enumerate()
+                .flat_map(|(i, t)| t.names().map(move |n| (i, Matcher::new(n))))
                 .collect(),
             shields: self
                 .terms
@@ -54,8 +60,12 @@ impl Glossary {
             deprecated: self
                 .terms
                 .iter()
-                .flat_map(|t| t.deprecated.iter().map(move |d| (t, d.as_str())))
-                .map(|(t, d)| (t, d, Matcher::new(d)))
+                .enumerate()
+                .flat_map(|(i, t)| t.deprecated.iter().map(move |d| (i, d.clone())))
+                .map(|(i, d)| {
+                    let matcher = Matcher::new(&d);
+                    (i, d, matcher)
+                })
                 .collect(),
         }
     }
@@ -71,22 +81,31 @@ fn overlaps(a: &Range<usize>, b: &Range<usize>) -> bool {
     a.start < b.end && b.start < a.end
 }
 
-impl<'a> Marks<'a> {
+impl Marks {
     /// Every occurrence to mark in `text`, ordered by position and never
     /// overlapping. A deprecated synonym outranks an admitted name over the
     /// same word, so a synonym is never marked as less than a plain term.
-    pub fn occurrences(&self, text: &str) -> Vec<Occurrence<'a>> {
-        let covered: Vec<Range<usize>> = self.shields.iter().flat_map(|s| s.ranges(text)).collect();
+    ///
+    /// The text is blanked of its citations once here rather than once per
+    /// matcher: a glossary of twenty terms otherwise blanks every line it
+    /// reads forty times over.
+    pub fn occurrences<'a>(&'a self, text: &str) -> Vec<Occurrence<'a>> {
+        let cleaned = Matcher::cleaned(text);
+        let covered: Vec<Range<usize>> = self
+            .shields
+            .iter()
+            .flat_map(|s| s.ranges_cleaned(&cleaned))
+            .collect();
         let mut kept: Vec<Occurrence<'a>> = self
             .deprecated
             .iter()
             .flat_map(|(term, synonym, m)| {
-                m.ranges(text)
+                m.ranges_cleaned(&cleaned)
                     .into_iter()
                     .filter(|hit| !inside(hit, &covered))
                     .map(move |range| Occurrence {
                         range,
-                        term,
+                        term: &self.terms[*term],
                         mark: Mark::Deprecated(synonym),
                     })
             })
@@ -98,11 +117,13 @@ impl<'a> Marks<'a> {
             .names
             .iter()
             .flat_map(|(term, m)| {
-                m.ranges(text).into_iter().map(move |range| Occurrence {
-                    range,
-                    term,
-                    mark: Mark::Admitted,
-                })
+                m.ranges_cleaned(&cleaned)
+                    .into_iter()
+                    .map(move |range| Occurrence {
+                        range,
+                        term: &self.terms[*term],
+                        mark: Mark::Admitted,
+                    })
             })
             .collect();
         admitted.sort_by_key(|o| (o.range.start, std::cmp::Reverse(o.range.len())));
@@ -117,7 +138,7 @@ impl<'a> Marks<'a> {
 
     /// The `(term, synonym)` pairs the glossary deprecates that stand in
     /// `text` outside every name containing them.
-    pub fn live_deprecated(&self, text: &str) -> Vec<(&'a str, &'a str)> {
+    pub fn live_deprecated<'a>(&'a self, text: &str) -> Vec<(&'a str, &'a str)> {
         let mut out: Vec<(&str, &str)> = self
             .occurrences(text)
             .into_iter()

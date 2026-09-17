@@ -1,6 +1,7 @@
 //! App state and key handling. No terminal here, so every rule about keys
 //! and rows is a unit test over an `App`.
 
+use crate::glossary::Marks;
 use crate::render::approval;
 use crate::review::pair::{diff_versions, version_lines};
 use crate::review::{inline_view, scenario_view, DiffLine, Pairing, Review, ScenarioMatch};
@@ -173,6 +174,19 @@ pub struct App {
     /// Requirements whose scenarios are showing. Folded is the default, so
     /// an empty set is a view that has just opened.
     pub unfolded: BTreeSet<Anchor>,
+    /// The glossary's matchers, compiled once: the glossary cannot change
+    /// while the view is open.
+    marks: Marks,
+    /// The diff of the row the cache was filled from. A diff costs more
+    /// than a frame does, and it only changes when the selection does.
+    detail: DetailCache,
+}
+
+/// The lines of one row's diff, and which row they belong to.
+#[derive(Default)]
+struct DetailCache {
+    row: Option<Row>,
+    lines: Vec<DiffLine>,
 }
 
 pub const BINDINGS: &[(&str, &str)] = &[
@@ -246,6 +260,7 @@ impl App {
     pub fn new(review: Review, stores: BTreeMap<String, Store>) -> App {
         let rows = visible_rows(&review, &BTreeSet::new());
         let cursor = rows.iter().position(Row::selectable).unwrap_or(0);
+        let marks = review.glossary.marks();
         App {
             review,
             rows,
@@ -260,7 +275,16 @@ impl App {
             detail_height: 20,
             definitions_open: BTreeSet::new(),
             unfolded: BTreeSet::new(),
+            marks,
+            detail: DetailCache::default(),
         }
+    }
+
+    /// The glossary's compiled matchers, or nothing when the project has no
+    /// glossary: a `Marks` with no terms would mark nothing anyway, and the
+    /// drawer's `None` skips the work of asking.
+    pub fn marks(&self) -> Option<&Marks> {
+        (!self.review.glossary.is_empty()).then_some(&self.marks)
     }
 
     /// `D`: toggle the definitions panel for the current pairing.
@@ -854,10 +878,25 @@ impl App {
         (s.errors, s.warnings, s.notes)
     }
 
-    pub fn detail_lines(&self) -> Vec<DiffLine> {
-        let Some(row) = self.current_row() else {
-            return Vec::new();
+    /// The diff of the row under the cursor, computed once per selection.
+    /// The drawer calls `refresh_detail` before it reads this.
+    pub fn detail_lines(&self) -> &[DiffLine] {
+        &self.detail.lines
+    }
+
+    /// Recompute the cached diff when the cursor has moved to another row.
+    pub fn refresh_detail(&mut self) {
+        let row = self.current_row().cloned();
+        if self.detail.row == row {
+            return;
+        }
+        self.detail = DetailCache {
+            lines: row.as_ref().map(|r| self.diff_of(r)).unwrap_or_default(),
+            row,
         };
+    }
+
+    fn diff_of(&self, row: &Row) -> Vec<DiffLine> {
         if let Some((_, m)) = self.scenario_at(row) {
             return scenario_view(m);
         }

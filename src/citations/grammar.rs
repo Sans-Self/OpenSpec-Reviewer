@@ -5,19 +5,25 @@
 use super::Citation;
 use regex::Regex;
 use std::ops::Range;
+use std::sync::LazyLock;
 
 /// Literal: `spec:<capability> § <name>`. The name runs to a double quote,
 /// backtick or newline, so an apostrophe survives. Single-quoted citations
 /// are therefore unsupported, which the convention already states.
-const LITERAL: &str = r#"spec:([a-z0-9-]+)\s*§\s*([^"`\n]+)"#;
+static LITERAL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"spec:([a-z0-9-]+)\s*§\s*([^"`\n]+)"#).expect("literal grammar compiles")
+});
 
 /// The same tag opened with a backtick: the name runs to the closing
 /// backtick, line breaks included.
-const SPAN: &str = r"`spec:([a-z0-9-]+)\s*§\s*([^`]+)`";
+static SPAN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"`spec:([a-z0-9-]+)\s*§\s*([^`]+)`").expect("span grammar compiles")
+});
 
 /// What a continuation line inside a span may start with that is not part
 /// of the name: `#`, `//`, `///`, `//!`, `*`, `--`.
-const MARKER: &str = r"^(?:#+|/{2,}!?|\*|--)\s*";
+static MARKER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:#+|/{2,}!?|\*|--)\s*").expect("marker grammar compiles"));
 
 /// A citation as found in text, with what the error message needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,10 +34,9 @@ pub struct Found {
     pub ends_at_line_break: bool,
 }
 
+/// Only the call form depends on configuration; the rest of the grammar is
+/// the same for every reader, so it is compiled once per process.
 pub struct Grammar {
-    literal: Regex,
-    span: Regex,
-    marker: Regex,
     call: Option<Regex>,
 }
 
@@ -44,12 +49,7 @@ impl Grammar {
             ))
             .expect("call grammar compiles")
         });
-        Grammar {
-            literal: Regex::new(LITERAL).expect("literal grammar compiles"),
-            span: Regex::new(SPAN).expect("span grammar compiles"),
-            marker: Regex::new(MARKER).expect("marker grammar compiles"),
-            call,
-        }
+        Grammar { call }
     }
 
     pub fn literal(text: &str) -> Vec<Citation> {
@@ -62,14 +62,14 @@ impl Grammar {
 
     /// Continuation lines lose their indentation and one comment marker;
     /// the lines then join with a space.
-    fn unwrap_span(&self, name: &str) -> String {
+    fn unwrap_span(name: &str) -> String {
         name.split('\n')
             .enumerate()
             .map(|(i, line)| {
                 if i == 0 {
                     line.to_string()
                 } else {
-                    self.marker.replace(line.trim_start(), "").into_owned()
+                    MARKER.replace(line.trim_start(), "").into_owned()
                 }
             })
             .collect::<Vec<_>>()
@@ -81,15 +81,15 @@ impl Grammar {
     pub fn found(&self, text: &str) -> Vec<Found> {
         let mut out = Vec::new();
         let mut spans: Vec<Range<usize>> = Vec::new();
-        for c in self.span.captures_iter(text) {
+        for c in SPAN.captures_iter(text) {
             let whole = c.get(0).expect("match");
             spans.push(whole.range());
             out.push(Found {
-                citation: Citation::new(&c[1], &self.unwrap_span(&c[2])),
+                citation: Citation::new(&c[1], &Grammar::unwrap_span(&c[2])),
                 ends_at_line_break: false,
             });
         }
-        for c in self.literal.captures_iter(text) {
+        for c in LITERAL.captures_iter(text) {
             let whole = c.get(0).expect("match");
             if spans.iter().any(|r| r.contains(&whole.start())) {
                 continue;
@@ -114,13 +114,8 @@ impl Grammar {
     /// Text with every literal citation removed, for searches that must not
     /// count formal citations as prose.
     pub fn strip(text: &str) -> String {
-        let without_spans = Regex::new(SPAN)
-            .expect("span grammar compiles")
-            .replace_all(text, "");
-        Regex::new(LITERAL)
-            .expect("literal grammar compiles")
-            .replace_all(&without_spans, "")
-            .into_owned()
+        let without_spans = SPAN.replace_all(text, "");
+        LITERAL.replace_all(&without_spans, "").into_owned()
     }
 
     /// The same, with each citation replaced by spaces of its own byte
@@ -128,12 +123,7 @@ impl Grammar {
     /// into `text`, which is what lets a caller mark what it found.
     pub fn blank(text: &str) -> String {
         let pad = |c: &regex::Captures| " ".repeat(c[0].len());
-        let without_spans = Regex::new(SPAN)
-            .expect("span grammar compiles")
-            .replace_all(text, pad);
-        Regex::new(LITERAL)
-            .expect("literal grammar compiles")
-            .replace_all(&without_spans, pad)
-            .into_owned()
+        let without_spans = SPAN.replace_all(text, pad);
+        LITERAL.replace_all(&without_spans, pad).into_owned()
     }
 }

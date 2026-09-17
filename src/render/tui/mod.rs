@@ -45,8 +45,15 @@ fn event_loop(
     app: &mut App,
     interrupted: &AtomicBool,
 ) -> io::Result<()> {
+    // Nothing in the view moves on its own, so a frame drawn on a poll
+    // timeout is the frame already on the screen. The poll stays at 250 ms
+    // so a signal is still noticed that soon.
+    let mut dirty = true;
     while !app.quit && !interrupted.load(Ordering::Relaxed) {
-        terminal.draw(|f| ui::draw(f, app))?;
+        if dirty {
+            terminal.draw(|f| ui::draw(f, app))?;
+            dirty = false;
+        }
         if !event::poll(Duration::from_millis(250))? {
             continue;
         }
@@ -55,8 +62,9 @@ fn event_loop(
                 if let Some(app::Effect::EscalateNote) = app.handle_key(key) {
                     escalate_to_editor(terminal, app)?;
                 }
+                dirty = true;
             }
-            Event::Resize(_, _) => {}
+            Event::Resize(_, _) => dirty = true,
             _ => {}
         }
     }
