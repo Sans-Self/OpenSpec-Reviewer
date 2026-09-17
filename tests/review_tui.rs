@@ -8,7 +8,7 @@ use common::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use openspec_reviewer::build::build_review;
 use openspec_reviewer::render::colour::Palette;
-use openspec_reviewer::render::tui::{App, DetailMode, Pane, Row, View};
+use openspec_reviewer::render::tui::{App, DetailMode, Effect, Focus, Pane, Row, Transient};
 use openspec_reviewer::source::{ChangeSource, Source};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -174,7 +174,7 @@ fn the_detail_pane_follows_the_list_selection() {
     app.handle_key(ctrl('u'));
     assert_eq!(app.scroll, before);
     app.handle_key(key(KeyCode::Tab));
-    assert_eq!(app.focus, Pane::Detail);
+    assert_eq!(app.pane, Pane::Detail);
     app.handle_key(key(KeyCode::Char('j')));
     assert_eq!(
         app.scroll,
@@ -252,13 +252,13 @@ fn keys_follow_vi_and_arrow_conventions__help() {
     let repo = tui_repo();
     let mut app = app_for(&repo);
     app.handle_key(key(KeyCode::Char('?')));
-    assert_eq!(app.view, View::Help);
+    assert_eq!(app.focus, Focus::Transient(Transient::Help));
     let screen = render(&mut app, 120, 30);
     for (k, _) in openspec_reviewer::render::tui::BINDINGS {
         assert!(screen.contains(k), "help lacks {k}: {screen}");
     }
     app.handle_key(key(KeyCode::Char('x')));
-    assert_eq!(app.view, View::Main);
+    assert_eq!(app.focus, Focus::Browsing);
     app.handle_key(key(KeyCode::Esc));
     assert!(app.quit, "Esc quits from the main view");
 }
@@ -315,4 +315,267 @@ fn the_view_restores_the_terminal_on_exit() {
     );
     assert!(src.contains("ratatui::restore()"), "quit path restores");
     assert!(src.contains("SIGTERM"), "signals set the quit flag");
+}
+
+/// The same requirement with one scenario gone: a dropped scenario keeps
+/// its row, and its finding belongs to that row.
+const DROPS_SCENARIO: &str = "\
+## MODIFIED Requirements
+
+### Requirement: Flat index of all routes and pages
+
+The dashboard MUST offer an index view listing every route and every
+page of the active website.
+
+#### Scenario: Route-mounted page appears as a row
+
+- **WHEN** a route mounts a page
+- **THEN** the index shows one row
+
+#### Scenario: Orphan page appears without a path
+
+- **WHEN** a page is not mounted by any route
+- **THEN** the page appears as a row without a path
+";
+
+fn drop_repo() -> Repo {
+    let repo = Repo::new();
+    repo.canon("alpha", ALPHA_CANON)
+        .delta("foo", "alpha", DROPS_SCENARIO);
+    repo
+}
+
+/// Move to the first requirement row and unfold it.
+fn unfold_first(app: &mut App) {
+    while !matches!(app.current_row(), Some(Row::Requirement { .. })) {
+        app.handle_key(key(KeyCode::Char('j')));
+    }
+    app.handle_key(key(KeyCode::Char(' ')));
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__scenarios_folded_on_open() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    assert!(
+        !app.rows.iter().any(|r| matches!(r, Row::Scenario { .. })),
+        "no scenario row is in the list when the view opens"
+    );
+    let screen = render(&mut app, 120, 30);
+    assert!(
+        !screen.contains("Feature mount appears"),
+        "a folded requirement hides its scenarios: {screen}"
+    );
+
+    unfold_first(&mut app);
+    let scenarios = app
+        .rows
+        .iter()
+        .filter(|r| matches!(r, Row::Scenario { .. }))
+        .count();
+    assert_eq!(scenarios, 3, "Space unfolds the requirement's scenarios");
+    let screen = render(&mut app, 120, 30);
+    assert!(screen.contains("Feature mount appears"), "{screen}");
+    app.handle_key(key(KeyCode::Char(' ')));
+    assert!(
+        !app.rows.iter().any(|r| matches!(r, Row::Scenario { .. })),
+        "Space folds them again"
+    );
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__a_removed_scenario_has_a_row() {
+    let repo = drop_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    let dropped = app
+        .rows
+        .iter()
+        .find(|r| {
+            app.scenario_at(r)
+                .is_some_and(|(_, m)| m.name() == "Feature mount appears")
+        })
+        .cloned()
+        .expect("the dropped scenario has a row");
+    let (_, m) = app.scenario_at(&dropped).unwrap();
+    assert_eq!(m.heading_kind().glyph(), '-', "its glyph is `-`");
+    let screen = render(&mut app, 120, 30);
+    assert!(screen.contains("- Feature mount appears"), "{screen}");
+}
+
+#[test]
+fn keys_follow_vi_and_arrow_conventions__jump_into_a_folded_requirement() {
+    let repo = drop_repo();
+    let mut app = app_for(&repo);
+    assert!(!app.rows.iter().any(|r| matches!(r, Row::Scenario { .. })));
+    app.handle_key(key(KeyCode::Char('n')));
+    let (_, m) = app
+        .current_row()
+        .and_then(|r| app.scenario_at(r))
+        .expect("n lands on the scenario that carries the finding");
+    assert_eq!(m.name(), "Feature mount appears");
+    assert!(
+        app.rows.iter().any(|r| matches!(r, Row::Scenario { .. })),
+        "the requirement it jumped into unfolded"
+    );
+}
+
+#[test]
+fn keys_follow_vi_and_arrow_conventions__approve_from_a_scenario_row() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    app.handle_key(key(KeyCode::Char('j')));
+    assert!(matches!(app.current_row(), Some(Row::Scenario { .. })));
+    app.handle_key(key(KeyCode::Char('a')));
+    let p = app.current_pairing().expect("the scenario's parent");
+    assert_eq!(
+        openspec_reviewer::render::approval(p),
+        openspec_reviewer::state::ApprovalStatus::Approved,
+        "`a` on a scenario row toggles its parent requirement"
+    );
+    let screen = render(&mut app, 120, 30);
+    assert!(
+        screen.contains("[√] ~ Flat index of all routes and pages"),
+        "{screen}"
+    );
+}
+
+#[test]
+fn a_note_is_written_in_a_popup() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('e')));
+    let edit = app.note_edit().expect("`e` opens the popup");
+    assert_eq!(edit.title, "Scenario: Route-mounted page appears as a row");
+    assert!(
+        edit.quote
+            .iter()
+            .any(|l| l.contains("a route mounts a page")),
+        "the popup quotes the anchor's body: {:?}",
+        edit.quote
+    );
+    let screen = render(&mut app, 120, 30);
+    assert!(screen.contains("writing a note"), "{screen}");
+    assert!(
+        openspec_reviewer::render::tui::status_text(&app).contains("mode: note"),
+        "the mode is named in text"
+    );
+    app.handle_key(key(KeyCode::Char('?')));
+    assert!(
+        app.note_edit().is_some(),
+        "no second overlay opens over the popup"
+    );
+}
+
+#[test]
+fn a_note_is_written_in_a_popup__write_and_save() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('e')));
+    for c in "no".chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.note_edit().is_none(), "⏎ closes the popup");
+    let p = app.current_pairing().unwrap();
+    assert_eq!(
+        p.scenario_note("Route-mounted page appears as a row")
+            .map(|n| n.text.as_str()),
+        Some("no")
+    );
+    let screen = render(&mut app, 200, 30);
+    assert!(
+        screen.contains("Route-mounted page appears as a row ✎"),
+        "the row shows `✎`: {screen}"
+    );
+    assert!(
+        screen.contains("Flat index of all routes and pages ✎"),
+        "and so does the requirement above it: {screen}"
+    );
+
+    app.handle_key(key(KeyCode::Char('e')));
+    for _ in 0..2 {
+        app.handle_key(key(KeyCode::Backspace));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert!(
+        app.current_pairing()
+            .unwrap()
+            .scenario_note("Route-mounted page appears as a row")
+            .is_none(),
+        "an empty buffer removes the note"
+    );
+}
+
+#[test]
+fn a_note_is_written_in_a_popup__cancel() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('e')));
+    for c in "draft".chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
+    app.handle_key(key(KeyCode::Esc));
+    assert!(app.note_edit().is_none(), "the popup closes");
+    assert!(!app.quit, "Esc in the popup does not quit the view");
+    assert!(
+        app.current_pairing()
+            .unwrap()
+            .scenario_note("Route-mounted page appears as a row")
+            .is_none(),
+        "the note is unchanged"
+    );
+}
+
+#[test]
+fn a_note_is_written_in_a_popup__escalate_to_the_editor() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    app.handle_key(key(KeyCode::Char('e')));
+    for c in "short".chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
+    assert_eq!(
+        app.handle_key(ctrl('e')),
+        Some(Effect::EscalateNote),
+        "^E hands the buffer to the editor"
+    );
+    assert_eq!(
+        app.note_edit().map(|e| e.buffer.as_str()),
+        Some("short"),
+        "the buffer is what the editor is seeded with"
+    );
+    let seen = openspec_reviewer::state::edit_note_with(
+        &["sh".to_string(), "-c".to_string(), "cat \"$0\"".to_string()],
+        Some("short"),
+    )
+    .unwrap();
+    assert_eq!(seen.as_deref(), Some("short"), "$EDITOR opens on that text");
+    app.set_note_buffer("what the\neditor saved");
+    assert_eq!(
+        app.note_edit().map(|e| e.buffer.as_str()),
+        Some("what the editor saved"),
+        "the popup returns holding it, with no line breaks"
+    );
+}
+
+#[test]
+fn a_note_is_written_in_a_popup__keys_reach_the_popup() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    app.handle_key(key(KeyCode::Char('e')));
+    app.handle_key(key(KeyCode::Char('q')));
+    assert_eq!(app.note_edit().map(|e| e.buffer.as_str()), Some("q"));
+    assert!(!app.quit, "the view does not quit");
+    app.handle_key(key(KeyCode::Backspace));
+    assert_eq!(app.note_edit().map(|e| e.buffer.as_str()), Some(""));
 }

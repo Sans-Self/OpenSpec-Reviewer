@@ -3,7 +3,9 @@
 mod app;
 mod ui;
 
-pub use app::{App, DetailMode, Effect, HistoryMode, Pane, Row, View, BINDINGS};
+pub use app::{
+    App, DetailMode, Effect, Focus, HistoryMode, Modal, NoteEdit, Pane, Row, Transient, BINDINGS,
+};
 pub use ui::{draw, status_text, styled_line};
 
 use crate::review::Review;
@@ -50,8 +52,8 @@ fn event_loop(
         }
         match event::read()? {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
-                if let Some(app::Effect::EditNote) = app.handle_key(key) {
-                    edit_note_suspended(terminal, app)?;
+                if let Some(app::Effect::EscalateNote) = app.handle_key(key) {
+                    escalate_to_editor(terminal, app)?;
                 }
             }
             Event::Resize(_, _) => {}
@@ -61,15 +63,17 @@ fn event_loop(
     Ok(())
 }
 
-/// Leave the alternate screen, run the editor, come back.
-fn edit_note_suspended(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()> {
+/// `^E`: leave the alternate screen, run the editor on the popup's buffer,
+/// come back holding what it saved. Anything that wants line structure
+/// leaves for the real editor and comes back.
+fn escalate_to_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()> {
+    let current = app.note_edit().map(|e| e.buffer.clone());
     ratatui::restore();
-    let current = app.current_note();
     let edited = crate::state::edit_note(current.as_deref());
     *terminal = ratatui::try_init()?;
     terminal.clear()?;
     match edited {
-        Ok(note) => app.set_current_note(note),
+        Ok(text) => app.set_note_buffer(text.as_deref().unwrap_or("")),
         Err(e) => app.message = Some(format!("editor failed: {e}")),
     }
     Ok(())

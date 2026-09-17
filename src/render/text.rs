@@ -56,7 +56,7 @@ fn write_pairing(out: &mut String, p: &Pairing, colour: bool) {
     let markers = format!(
         "{}{}",
         super::finding_marker(p),
-        super::note_marker(p.state.note.is_some())
+        super::note_marker(p.has_note())
     );
     let heading = format!("{mark} {} {}", p.kind.glyph(), p.name);
     let _ = writeln!(
@@ -92,13 +92,16 @@ fn write_pairing(out: &mut String, p: &Pairing, colour: bool) {
             let _ = writeln!(out, "        {d}");
         }
     }
-    if let Some(note) = &p.state.note {
-        for (i, l) in note.lines().enumerate() {
-            let _ = writeln!(
-                out,
-                "    {} {l}",
-                if i == 0 { "✎ note:" } else { "       " }
-            );
+    for note in &p.notes {
+        let head = format!("✎ note{}:", note.anchor_suffix());
+        for (i, l) in note.text.lines().enumerate() {
+            let _ = match i {
+                0 => writeln!(out, "    {head} {l}"),
+                _ => writeln!(out, "    {:width$} {l}", "", width = head.chars().count()),
+            };
+        }
+        if note.outdated {
+            let _ = writeln!(out, "        text changed since the note was written");
         }
     }
     let _ = writeln!(out, "    {}", history_summary(p));
@@ -122,15 +125,16 @@ pub fn render(review: &Review, options: TextOptions) -> String {
         if !change.artefacts.is_empty() {
             let _ = writeln!(out, "{}", paint(colour, ansi::BOLD, "## artefacts"));
             for a in &change.artefacts {
-                let status = a.state.status(crate::review::normalize::text_hash(
-                    a.artefact.after.as_deref().unwrap_or(""),
-                ));
+                let status = a.state.status(a.text_hash());
                 let _ = writeln!(out, "{} {}", status.mark(), a.artefact.name);
                 for line in a.lines() {
                     let _ = writeln!(out, "    {}", render_line(&line, colour));
                 }
                 if let Some(note) = &a.state.note {
-                    let _ = writeln!(out, "    ✎ note: {note}");
+                    let _ = writeln!(out, "    ✎ note: {}", note.text);
+                    if a.note_outdated() {
+                        let _ = writeln!(out, "        text changed since the note was written");
+                    }
                 }
                 out.push('\n');
             }

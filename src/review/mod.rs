@@ -12,7 +12,9 @@ pub use diff::{
 };
 pub use findings::{collisions, Finding, FindingKind, Location, Severity, Sibling, Summary};
 pub use history::{collect_history, HistoryEntry};
-pub use pair::{inline_view, pair_change, CapabilityReview, ChangeReview, Pairing};
+pub use pair::{
+    inline_view, pair_change, scenario_view, AnchoredNote, CapabilityReview, ChangeReview, Pairing,
+};
 
 use crate::model::Artefact;
 use crate::source::FileChange;
@@ -30,6 +32,19 @@ pub struct ArtefactReview {
 impl ArtefactReview {
     pub fn key(&self) -> String {
         self.artefact.name.clone()
+    }
+
+    /// Hash of the after text: what an approval or a note here is tied to.
+    pub fn text_hash(&self) -> u64 {
+        normalize::text_hash(self.artefact.after.as_deref().unwrap_or(""))
+    }
+
+    /// The note's anchor has moved since the note was written.
+    pub fn note_outdated(&self) -> bool {
+        self.state
+            .note
+            .as_ref()
+            .is_some_and(|n| n.is_outdated(self.text_hash()))
     }
 
     pub fn lines(&self) -> Vec<DiffLine> {

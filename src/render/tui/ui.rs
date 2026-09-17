@@ -1,11 +1,12 @@
 //! Drawing. Every mark carries a glyph; the palette only adds colour.
 
 use super::app::{
-    artefact_hash, history_entries, App, DetailMode, HistoryMode, Pane, Row, View, BINDINGS,
+    history_entries, App, DetailMode, Focus, HistoryMode, Modal, NoteEdit, Pane, Row, Transient,
+    BINDINGS,
 };
 use crate::render::colour::Palette;
 use crate::render::{approval, finding_marker, history_summary, note_marker};
-use crate::review::{DiffLine, LineRole, ParaKind, Severity, SpanMark};
+use crate::review::{AnchoredNote, DiffLine, LineRole, ParaKind, Severity, SpanMark};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -25,16 +26,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .split(vertical[0]);
     app.detail_height = panes[1].height.saturating_sub(2);
 
-    match app.view.clone() {
-        View::History(_) => draw_history(frame, app, panes[0], panes[1], palette),
-        _ => {
-            draw_list(frame, app, panes[0], palette);
-            draw_detail(frame, app, panes[1], palette);
-        }
+    if app.history_state().is_some() {
+        draw_history(frame, app, panes[0], panes[1], palette);
+    } else {
+        draw_list(frame, app, panes[0], palette);
+        draw_detail(frame, app, panes[1], palette);
     }
     draw_status(frame, app, vertical[1], palette);
-    if app.view == View::Help {
-        draw_help(frame, area, palette);
+    match &app.focus {
+        Focus::Transient(Transient::Help) => draw_help(frame, area, palette),
+        Focus::Modal(Modal::Note(edit)) => draw_note(frame, edit, panes[1], palette),
+        _ => {}
     }
 }
 
@@ -53,7 +55,7 @@ fn row_line(app: &App, row: &Row, palette: Palette) -> Line<'static> {
         ),
         Row::Artefact { .. } => {
             let a = app.artefact_at(row).expect("artefact row");
-            let mark = a.state.status(artefact_hash(a)).mark();
+            let mark = a.state.status(a.text_hash()).mark();
             Line::from(vec![
                 Span::raw(format!("{mark} ")),
                 Span::styled("· ", palette.muted()),
@@ -79,10 +81,56 @@ fn row_line(app: &App, row: &Row, palette: Palette) -> Line<'static> {
                 Span::raw(p.name.clone()),
                 Span::raw(" "),
                 Span::styled(finding_marker(p).to_string(), marker_style),
-                Span::raw(note_marker(p.state.note.is_some()).to_string()),
+                Span::raw(note_marker(p.has_note()).to_string()),
+            ])
+        }
+        Row::Scenario { .. } => {
+            let (p, m) = app.scenario_at(row).expect("scenario row");
+            let kind = m.heading_kind();
+            let glyph_style = match kind {
+                ParaKind::Added => palette.added(),
+                ParaKind::Removed => palette.removed(),
+                _ => palette.changed(),
+            };
+            let worst = p
+                .findings
+                .iter()
+                .filter(|f| f.location.scenario.as_deref() == Some(m.name()))
+                .map(|f| f.severity)
+                .max();
+            let (marker, marker_style) = match worst {
+                Some(Severity::Error) => ("!", palette.error()),
+                Some(Severity::Warning) => ("?", palette.warning()),
+                _ => ("", Style::default()),
+            };
+            // No approval mark: the blank column says approval is per
+            // requirement without needing a legend.
+            Line::from(vec![
+                Span::raw("        ".to_string()),
+                Span::styled(format!("{} ", kind.glyph()), glyph_style),
+                Span::raw(m.name().to_string()),
+                Span::raw(" "),
+                Span::styled(marker.to_string(), marker_style),
+                Span::raw(note_marker(p.scenario_note(m.name()).is_some()).to_string()),
             ])
         }
     }
+}
+
+/// A note under the diff, with its anchor and whether the words moved.
+fn note_lines(note: &AnchoredNote, palette: Palette) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        format!("✎ note{}", note.anchor_suffix()),
+        palette.heading(),
+    )];
+    lines.extend(note.text.lines().map(|l| Line::raw(format!("  {l}"))));
+    if note.outdated {
+        lines.push(Line::styled(
+            "  text changed since the note was written",
+            palette.warning(),
+        ));
+    }
+    lines
 }
 
 fn draw_list(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
@@ -91,7 +139,7 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
         .iter()
         .map(|row| ListItem::new(row_line(app, row, palette)))
         .collect();
-    let title = if app.focus == Pane::List {
+    let title = if app.pane == Pane::List {
         "[items]"
     } else {
         " items "
@@ -197,9 +245,8 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                     .map(|d| Line::styled(format!("    {d}"), palette.muted())),
             );
         }
-        if let Some(note) = &p.state.note {
-            lines.push(Line::styled("✎ note", palette.heading()));
-            lines.extend(note.lines().map(|l| Line::raw(format!("  {l}"))));
+        for note in &p.notes {
+            lines.extend(note_lines(note, palette));
         }
         lines.push(Line::styled(history_summary(p), palette.muted()));
         if app.definitions_shown() {
@@ -240,12 +287,37 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                 }
             }
         }
+    } else if let Some((p, m)) = app.scenario_at(row) {
+        lines.extend(app.detail_lines().iter().map(|l| styled_line(l, palette)));
+        lines.push(Line::raw(""));
+        for f in p
+            .findings
+            .iter()
+            .filter(|f| f.location.scenario.as_deref() == Some(m.name()))
+        {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{}: ", f.severity),
+                    severity_style(f.severity, palette),
+                ),
+                Span::raw(f.message.clone()),
+            ]));
+        }
+        if let Some(note) = p.scenario_note(m.name()) {
+            lines.extend(note_lines(note, palette));
+        }
     } else if let Some(a) = app.artefact_at(row) {
         lines.extend(a.lines().iter().map(|l| styled_line(l, palette)));
         if let Some(note) = &a.state.note {
             lines.push(Line::raw(""));
             lines.push(Line::styled("✎ note", palette.heading()));
-            lines.extend(note.lines().map(|l| Line::raw(format!("  {l}"))));
+            lines.extend(note.text.lines().map(|l| Line::raw(format!("  {l}"))));
+            if a.note_outdated() {
+                lines.push(Line::styled(
+                    "  text changed since the note was written",
+                    palette.warning(),
+                ));
+            }
         }
     }
     Text::from(lines)
@@ -313,9 +385,9 @@ fn two_columns(left: &str, right: &str, width: u16, palette: Palette) -> Vec<Lin
 fn draw_detail(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
     let title = format!(
         "{}{}{}",
-        if app.focus == Pane::Detail { "[" } else { " " },
+        if app.pane == Pane::Detail { "[" } else { " " },
         app.mode.label(),
-        if app.focus == Pane::Detail { "]" } else { " " }
+        if app.pane == Pane::Detail { "]" } else { " " }
     );
     let text = detail_text(app, palette, area.width.saturating_sub(2));
     let wrap = match app.mode {
@@ -332,7 +404,7 @@ fn draw_detail(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
 }
 
 fn draw_history(frame: &mut Frame, app: &App, left: Rect, right: Rect, palette: Palette) {
-    let View::History(h) = &app.view else {
+    let Some(h) = app.history_state() else {
         return;
     };
     let Some(p) = app.current_pairing() else {
@@ -383,11 +455,12 @@ fn draw_history(frame: &mut Frame, app: &App, left: Rect, right: Rect, palette: 
 pub fn status_text(app: &App) -> String {
     let (approved, total) = app.approval_counts();
     let (e, w, n) = app.finding_counts();
-    let mode = match &app.view {
-        View::History(h) => match h.mode {
+    let mode = match (app.history_state(), app.note_edit()) {
+        (Some(h), _) => match h.mode {
             HistoryMode::Version => "history",
             HistoryMode::DiffToPrevious => "history diff",
         },
+        (_, Some(_)) => "note",
         _ => app.mode.label(),
     };
     let mut s = format!(
@@ -437,4 +510,74 @@ fn draw_help(frame: &mut Frame, area: Rect, palette: Palette) {
             .block(Block::default().borders(Borders::ALL).title("keys")),
         popup,
     );
+}
+
+/// The note popup, drawn over the detail pane. It quotes its anchor, so
+/// what the note is about stays readable whatever is behind it.
+fn draw_note(frame: &mut Frame, edit: &NoteEdit, area: Rect, palette: Palette) {
+    let width = area.width.max(20);
+    let inner = usize::from(width.saturating_sub(2));
+    let quote: Vec<String> = edit
+        .quote
+        .iter()
+        .flat_map(|p| wrapped(p, inner.saturating_sub(2)))
+        .collect();
+    let buffer = wrapped(&edit.buffer, inner);
+    let height = (quote.len() + buffer.len() + 6).min(usize::from(area.height)) as u16;
+    let popup = Rect {
+        x: area.x,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    let mut lines: Vec<Line> = vec![Line::styled(edit.title.clone(), palette.heading())];
+    lines.extend(
+        quote
+            .iter()
+            .map(|l| Line::styled(format!("  {l}"), palette.muted())),
+    );
+    lines.push(Line::raw(""));
+    lines.extend(buffer.iter().map(|l| Line::raw(l.clone())));
+    if buffer.is_empty() {
+        lines.push(Line::raw(""));
+    }
+    // The mode is named in text as well as drawn, so it does not depend on
+    // the popup's border being noticed.
+    lines.push(Line::styled(
+        "writing a note: ⏎ save, Esc cancel, ^E $EDITOR",
+        palette.muted(),
+    ));
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .block(Block::default().borders(Borders::ALL).title("note")),
+        popup,
+    );
+    let caret_row = quote.len() + 2 + buffer.len().saturating_sub(1);
+    let caret_col = buffer.last().map(|l| l.chars().count()).unwrap_or(0);
+    let x = popup.x + 1 + caret_col.min(inner.saturating_sub(1)) as u16;
+    let y = popup.y + 1 + caret_row as u16;
+    if y < popup.y + popup.height - 1 {
+        frame.set_cursor_position((x, y));
+    }
+}
+
+/// Greedy wrap at `width`, which is all a buffer with no line structure
+/// needs.
+fn wrapped(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let width = width.max(8);
+    let mut out: Vec<String> = Vec::new();
+    for word in text.split(' ') {
+        match out.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => out.push(word.to_string()),
+        }
+    }
+    out
 }
