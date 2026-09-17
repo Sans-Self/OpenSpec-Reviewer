@@ -26,7 +26,7 @@
 
 ## 4. Wrap-up
 
-- [ ] 4.1 Tests titled by requirement: the trailer is visible after
+- [x] 4.1 Tests titled by requirement: the trailer is visible after
       scrolling past a long diff in each mode, and a frame over a large
       artefact with a glossary finishes inside the budget.
-- [ ] 4.2 `clippy` and `rustfmt` clean.
+- [x] 4.2 `clippy` and `rustfmt` clean.

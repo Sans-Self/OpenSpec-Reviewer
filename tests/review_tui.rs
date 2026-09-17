@@ -710,3 +710,136 @@ fn glossary_terms_are_marked_where_they_appear__marking_without_colour() {
     assert_eq!(style.fg, None, "no colour without colour");
     assert!(underlined(style), "the underline is not a colour");
 }
+
+/// Sixty paragraphs: more than any pane in these tests can show at once.
+fn long_body(last: &str) -> String {
+    let mut body: String = (0..59)
+        .map(|i| {
+            format!("Paragraph {i} of the index contract, which the dashboard MUST honour.\n\n")
+        })
+        .collect();
+    body.push_str(last);
+    body.push_str("\n\n");
+    body
+}
+
+/// A change whose requirement has a diff longer than the detail pane and a
+/// finding under it: the delta drops a scenario canon has.
+fn long_diff_repo() -> Repo {
+    let canon = format!(
+        "# alpha\n\n## Requirements\n\n\
+         ### Requirement: Flat index of all routes and pages\n\n{}\
+         #### Scenario: Route-mounted page appears as a row\n\n\
+         - **WHEN** a route mounts a page\n- **THEN** the index shows one row\n\n\
+         #### Scenario: Feature mount appears\n\n\
+         - **WHEN** a route has a feature mount\n- **THEN** the row shows the feature name\n",
+        long_body("The index lists every route of the active website.")
+    );
+    let delta = format!(
+        "## MODIFIED Requirements\n\n\
+         ### Requirement: Flat index of all routes and pages\n\n{}\
+         #### Scenario: Route-mounted page appears as a row\n\n\
+         - **WHEN** a route mounts a page\n- **THEN** the index shows one row\n",
+        long_body("The index lists every route and every page of the active website.")
+    );
+    let repo = Repo::new();
+    repo.canon("alpha", &canon)
+        .delta("foo", "alpha", &delta)
+        .write("openspec/changes/foo/proposal.md", "# foo\n")
+        .write("openspec/changes/foo/tasks.md", "- [ ] 1\n");
+    repo
+}
+
+fn on_requirement(app: &mut App) {
+    while !matches!(app.current_row(), Some(Row::Requirement { .. })) {
+        app.handle_key(key(KeyCode::Char('j')));
+    }
+}
+
+/// Page down until `needle` is on the screen, or say how far it got.
+fn scroll_to(app: &mut App, needle: &str, width: u16, height: u16) -> String {
+    let mut screen = render(app, width, height);
+    for _ in 0..200 {
+        if screen.contains(needle) {
+            return screen;
+        }
+        app.handle_key(key(KeyCode::PageDown));
+        screen = render(app, width, height);
+    }
+    panic!("{needle:?} never came into view:\n{screen}");
+}
+
+#[test]
+fn rendering_cost_follows_the_screen_not_the_spec__findings_under_a_long_diff() {
+    let repo = long_diff_repo();
+    let mut app = app_for(&repo);
+    on_requirement(&mut app);
+    let top = render(&mut app, 140, 30);
+    assert!(
+        !top.contains("scenario dropped"),
+        "the diff is longer than the pane: {top}"
+    );
+    let screen = scroll_to(&mut app, "scenario dropped", 140, 30);
+    assert!(screen.contains("Feature mount appears"), "{screen}");
+}
+
+#[test]
+fn rendering_cost_follows_the_screen_not_the_spec__findings_under_a_long_diff_in_every_mode() {
+    let repo = long_diff_repo();
+    let mut app = app_for(&repo);
+    on_requirement(&mut app);
+    for mode in [DetailMode::SideBySide, DetailMode::Raw, DetailMode::Inline] {
+        app.handle_key(key(KeyCode::Char('m')));
+        assert_eq!(app.mode, mode);
+        app.scroll = 0;
+        let screen = scroll_to(&mut app, "scenario dropped", 140, 30);
+        assert!(screen.contains("scenario dropped"), "{mode:?}: {screen}");
+    }
+}
+
+/// Twenty terms, and a proposal of five thousand added lines that use them.
+fn large_artefact_repo() -> Repo {
+    let terms: String = (0..20)
+        .map(|i| {
+            format!(
+                "### Requirement: term{i}\n\n\
+                 A spec MUST use `term{i}` to mean:\n\n\
+                 The {i}th concept of the index contract.\n\n"
+            )
+        })
+        .collect();
+    let proposal: String = (0..5_000)
+        .map(|i| format!("- line {i} states that term{} MUST hold\n", i % 20))
+        .collect();
+    let repo = Repo::new();
+    repo.canon("alpha", ALPHA_CANON)
+        .canon(
+            "definitions",
+            &format!("# definitions\n\n## Requirements\n\n{terms}"),
+        )
+        .delta("foo", "alpha", DELTA)
+        .write("openspec/changes/foo/proposal.md", &proposal)
+        .write("openspec/changes/foo/tasks.md", "- [ ] 1\n");
+    repo
+}
+
+#[test]
+fn rendering_cost_follows_the_screen_not_the_spec__a_large_artefact_with_a_glossary() {
+    let repo = large_artefact_repo();
+    let mut app = app_for(&repo);
+    assert!(
+        matches!(app.current_row(), Some(Row::Artefact { .. })),
+        "the view opens on the proposal"
+    );
+    let start = std::time::Instant::now();
+    let screen = render(&mut app, 120, 40);
+    let took = start.elapsed();
+    assert!(
+        screen.contains("term0"),
+        "the artefact is what is drawn: {screen}"
+    );
+    assert!(
+        took < std::time::Duration::from_secs(1),
+        "one frame over 5,000 lines took {took:?}"
+    );
+}
