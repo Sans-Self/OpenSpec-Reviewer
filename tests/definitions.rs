@@ -522,7 +522,10 @@ fn the_detail_pane_can_show_the_terms_a_pairing_uses__pairing_uses_two_terms() {
         "deprecated list: {screen}"
     );
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    // The requirement under the cursor shows its scenarios, so step past them.
+    while app.current_pairing().unwrap().name == "Rotation produces a new group key" {
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    }
     assert!(!app.definitions_shown(), "per pairing, not global");
     app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
     assert!(app.definitions_shown(), "still open on the first pairing");

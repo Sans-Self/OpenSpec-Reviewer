@@ -13,17 +13,21 @@ removed, `>` renamed), name, then `!` for an error finding or `?` for a
 warning, and `✎` when it or any scenario under it carries a note. A
 scenario row shows no approval mark and no fold marker, and takes its
 glyph from the scenario match: `+` added, `-` removed, `~` changed, none
-when unchanged. Scenario rows are folded when the view opens. When the
-snapshot holds more than one change, each change gets its own heading
-row above its capabilities.
+when unchanged. When the snapshot holds more than one change, each
+change gets its own heading row above its capabilities.
 
-Rows nest as a tree. Each row after the roots MUST begin with a guide
-prefix in the muted style: `├─` when a later sibling follows, `└─` when
-it is the last sibling, and for every ancestor above it `│` when that
-ancestor has a later sibling, spaces when not. The roots are the change
-heading rows when there are several changes, otherwise the artefacts and
-capability headings; roots draw no connector. Guides are glyphs and MUST
-draw the same without colour.
+Scenario rows are shown only under a requirement that is open. A
+requirement is open while the cursor is on it or on one of its
+scenarios, and while `Space` has pinned it open; leaving an unpinned
+requirement folds it again. `Space` on a requirement or its scenario
+toggles the pin.
+
+Rows nest as a tree hanging from the change. Each row below a change
+MUST begin with a guide prefix in the muted style: `├─` when a later
+sibling follows, `└─` when it is the last sibling, and for every
+ancestor above it `│` when that ancestor has a later sibling, spaces
+when not. The change heading row, when present, draws no connector.
+Guides are glyphs and MUST draw the same without colour.
 
 #### Scenario: List for one change
 
@@ -42,10 +46,32 @@ draw the same without colour.
 
 #### Scenario: Scenarios folded on open
 
-- **GIVEN** a requirement with three scenarios
+- **GIVEN** a change with an artefact
+- **AND** a requirement with three scenarios
 - **WHEN** the view opens
-- **THEN** the list shows the requirement row
-- **AND** it shows no scenario rows under it
+- **THEN** the cursor is on the artefact row
+- **AND** the list shows no scenario rows
+
+#### Scenario: The cursor opens a requirement
+
+- **GIVEN** the cursor on an artefact row
+- **AND** a requirement with three scenarios below it
+- **WHEN** the user moves the cursor onto the requirement
+- **THEN** its three scenario rows appear under it
+
+#### Scenario: Leaving folds an unpinned requirement
+
+- **GIVEN** the cursor on an open requirement that is not pinned
+- **WHEN** the user moves the cursor past its last scenario
+- **THEN** its scenario rows disappear
+- **AND** the cursor is on the next requirement
+
+#### Scenario: Space pins a requirement open
+
+- **GIVEN** the cursor on a requirement
+- **WHEN** the user presses `Space`
+- **AND** moves the cursor onto another requirement
+- **THEN** the pinned requirement keeps its scenario rows
 
 #### Scenario: A removed scenario has a row
 
@@ -53,6 +79,14 @@ draw the same without colour.
 - **WHEN** the reviewer unfolds that requirement
 - **THEN** the dropped scenario has a row
 - **AND** the row's glyph is `-`
+
+#### Scenario: Roots hang from the change
+
+- **GIVEN** one change with two artefacts
+- **AND** one capability
+- **WHEN** the view renders
+- **THEN** both artefact rows begin with `├─`
+- **AND** the capability heading begins with `└─`
 
 #### Scenario: The last requirement closes the branch
 
@@ -69,10 +103,10 @@ draw the same without colour.
 - **THEN** the scenario row shows `│` in the requirement column
 - **AND** begins its own cell with `└─`
 
-#### Scenario: Fold marker follows Space
+#### Scenario: Fold marker follows the cursor
 
 - **GIVEN** a folded requirement with scenarios
-- **WHEN** the user presses `Space`
+- **WHEN** the user moves the cursor onto it
 - **THEN** the row's marker changes from `▸` to `▾`
 
 #### Scenario: Two changes are the roots
@@ -81,3 +115,4 @@ draw the same without colour.
 - **WHEN** the view renders
 - **THEN** each change heading row draws no connector
 - **AND** its artefacts and capabilities begin with `├─` or `└─`
+- **AND** their requirements begin one column further in

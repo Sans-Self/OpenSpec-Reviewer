@@ -17,17 +17,20 @@ reviewer presses `Space` to find out.
 - A requirement row with scenarios carries a fold marker before its
   approval mark: `▸` folded, `▾` unfolded. A requirement without
   scenarios carries a space there, so the marks stay aligned.
-- Depth follows the model: the change heading when the snapshot holds
-  more than one change, then artefacts and capabilities, then
-  requirements, then scenarios. With one change the artefacts and
-  capabilities are roots and draw no connector.
+- The tree hangs from the change: artefacts and capabilities are its
+  children, requirements theirs, scenarios theirs. With one change the
+  root is implicit and the artefacts start with a connector; with
+  several, each change heading is a bare root.
+- The cursor opens the requirement it rests on. Its scenarios appear
+  when the cursor lands on it and fold when the cursor leaves, unless
+  `Space` pinned them open. The marker shows `▾` for either reason.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `review-tui`: "The view is a list and a detail pane" gains the guides
-  and the fold marker.
+- `review-tui`: "The view is a list and a detail pane" gains the guides,
+  the fold marker and the open-on-cursor rule.
 
 ## Impact
 
@@ -39,5 +42,6 @@ reviewer presses `Space` to find out.
 
 ## Non-goals
 
-- Folding capabilities or artefacts. `Space` keeps its one meaning.
+- Folding capabilities or artefacts. `Space` keeps its one meaning,
+  now a pin.
 - A configurable guide set. Box drawing is what the borders already use.

@@ -12,18 +12,29 @@ Its prefix is, for every ancestor from the root down, `│  ` when that
 ancestor has later siblings and three spaces when not, then its own
 connector `├─ ` or `└─ `. Roots draw no connector.
 
-Depth is a function of the `Row` variant: `Change` 0, `Artefact` and
-`Capability` 1, `Requirement` 2, `Scenario` 3, all lowered by one when
-the snapshot holds a single change and no `Change` rows exist. `guides`
-takes `multi` so it does not have to look at the review.
+Depth is a function of the `Row` variant alone: `Change` 0, `Artefact`
+and `Capability` 1, `Requirement` 2, `Scenario` 3. With a single change
+no `Change` row exists and the artefacts hang from an implicit root, so
+they still draw a connector; only depth 0 draws none.
+
+## Hover is derived, pins are stored
+
+`App.unfolded` keeps only what `Space` pinned. The requirement the
+cursor is on or inside is open by virtue of the cursor, so
+`visible_rows` takes the pinned set and the cursor's anchor and shows a
+scenario when either admits it. Every cursor move ends in
+`rebuild_rows`, which recomputes the rows for the new position and finds
+the cursor's row again by identity. Leaving an unpinned requirement
+therefore folds it with no bookkeeping, and `n`/`p` landing on a
+scenario open its requirement without pinning it.
 
 ## The fold marker sits in the row, not the guide
 
 `▸` and `▾` say what `Space` will do, so they belong to the requirement's
 own cells, right after the connector and before the approval mark. A
 requirement with no scenarios draws a space there. The marker comes from
-`App.unfolded` and the scenario count on the pairing; both are already
-at hand in `row_line`. Scenario rows carry none.
+`App::is_open`, which is the pin or the cursor, and the scenario count
+on the pairing. Scenario rows carry none.
 
 ## Style
 
@@ -36,5 +47,6 @@ never the only signal" with no extra rule.
 
 `tree::guides` is tested against small row vectors: a single change with
 two capabilities, a folded and an unfolded requirement, and two changes.
-The row rendering is tested through `TestBackend` on the fold marker
-flipping with `Space`. Test titles quote the requirement.
+The row rendering is tested through `TestBackend`: the connectors on
+the artefact rows, the `│` column, the fold marker following the
+cursor, and pinning with `Space`. Test titles quote the requirement.

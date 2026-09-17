@@ -148,7 +148,7 @@ fn fold_marker(app: &App, row: &Row) -> &'static str {
         .is_some_and(|p| !p.diff.scenarios.is_empty());
     match row.anchor() {
         Some(anchor) if has_scenarios => {
-            if app.unfolded.contains(&anchor) {
+            if app.is_open(anchor) {
                 "▾"
             } else {
                 "▸"
@@ -159,8 +159,7 @@ fn fold_marker(app: &App, row: &Row) -> &'static str {
 }
 
 fn draw_list(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
-    let multi = app.review.changes.len() > 1;
-    let guides = tree::guides(&app.rows, multi);
+    let guides = tree::guides(&app.rows);
     let items: Vec<ListItem> = app
         .rows
         .iter()

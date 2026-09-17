@@ -10,25 +10,20 @@ const LAST: &str = "└─ ";
 const CONTINUE: &str = "│  ";
 const BLANK: &str = "   ";
 
-/// How deep a row sits. With a single change there are no change rows,
-/// so artefacts and capabilities are the roots.
-pub fn depth(row: &Row, multi: bool) -> usize {
-    let nested = match row {
+/// How deep a row sits under its change. With a single change there is
+/// no change row and the artefacts hang from an implicit root.
+pub fn depth(row: &Row) -> usize {
+    match row {
         Row::Change { .. } => 0,
         Row::Artefact { .. } | Row::Capability { .. } => 1,
         Row::Requirement { .. } => 2,
         Row::Scenario { .. } => 3,
-    };
-    if multi {
-        nested
-    } else {
-        nested.saturating_sub(1)
     }
 }
 
 /// One guide prefix per row, in row order.
-pub fn guides(rows: &[Row], multi: bool) -> Vec<String> {
-    let depths: Vec<usize> = rows.iter().map(|r| depth(r, multi)).collect();
+pub fn guides(rows: &[Row]) -> Vec<String> {
+    let depths: Vec<usize> = rows.iter().map(depth).collect();
     let last: Vec<bool> = (0..rows.len()).map(|i| is_last(&depths, i)).collect();
     (0..rows.len()).map(|i| prefix(&depths, &last, i)).collect()
 }
@@ -97,7 +92,7 @@ mod tests {
             requirement(0, 0, 0),
             requirement(0, 0, 1),
         ];
-        assert_eq!(guides(&rows, false), ["", "", "├─ ", "└─ "]);
+        assert_eq!(guides(&rows), ["├─ ", "└─ ", "   ├─ ", "   └─ "]);
     }
 
     #[test]
@@ -112,8 +107,16 @@ mod tests {
             scenario(0, 1, 0, 0),
         ];
         assert_eq!(
-            guides(&rows, false),
-            ["", "├─ ", "│  └─ ", "└─ ", "", "└─ ", "   └─ "]
+            guides(&rows),
+            [
+                "├─ ",
+                "│  ├─ ",
+                "│  │  └─ ",
+                "│  └─ ",
+                "└─ ",
+                "   └─ ",
+                "      └─ "
+            ]
         );
     }
 
@@ -129,7 +132,7 @@ mod tests {
             requirement(1, 0, 0),
         ];
         assert_eq!(
-            guides(&rows, true),
+            guides(&rows),
             ["", "├─ ", "└─ ", "   └─ ", "", "└─ ", "   └─ "]
         );
     }
