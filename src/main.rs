@@ -1,6 +1,9 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::env::{Bash, Fish, Shells, Zsh};
+use clap_complete::{ArgValueCandidates, CompleteEnv, CompletionCandidate};
 use openspec_reviewer::build::{attach_state, build_review};
 use openspec_reviewer::render::{json, markdown, text, tui};
+use openspec_reviewer::source::complete;
 use openspec_reviewer::source::{ChangeSource, DiffSource, GhSource, GitSource, Source};
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -45,18 +48,27 @@ enum Format {
 #[derive(Subcommand)]
 enum Command {
     /// The change as it is in the working tree.
-    Change { name: String },
+    Change {
+        #[arg(add = ArgValueCandidates::new(|| here(complete::change_names)))]
+        name: String,
+    },
     /// A unified diff from a file, or stdin when the path is `-` or absent.
-    Diff { path: Option<PathBuf> },
+    Diff {
+        #[arg(value_hint = clap::ValueHint::FilePath)]
+        path: Option<PathBuf>,
+    },
     /// The files of <REF> against --base, which defaults to main, then master.
     Git {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "REF", add = ArgValueCandidates::new(|| here(complete::git_refs)))]
         reference: String,
-        #[arg(long, value_name = "REF")]
+        #[arg(long, value_name = "REF", add = ArgValueCandidates::new(|| here(complete::git_refs)))]
         base: Option<String>,
     },
     /// A GitHub pull request by number or URL through the gh CLI.
-    Gh { pr: String },
+    Gh {
+        #[arg(add = ArgValueCandidates::new(|| here(complete::pull_requests)))]
+        pr: String,
+    },
     /// Check every citation in specs and source against the repository.
     Lint {
         /// Print the per-requirement ledger of citing source files.
@@ -86,7 +98,19 @@ enum LintAction {
     Init,
 }
 
+/// Candidates for the directory the shell is in; a lookup that cannot find
+/// the directory answers for the relative one, which is the same place.
+fn here(lookup: fn(&std::path::Path) -> Vec<CompletionCandidate>) -> Vec<CompletionCandidate> {
+    lookup(&std::env::current_dir().unwrap_or_default())
+}
+
 fn main() -> ExitCode {
+    // Before `parse`, and before anything writes to stdout: with COMPLETE set
+    // the process belongs to the shell, not to the user.
+    CompleteEnv::with_factory(Cli::command)
+        .shells(Shells(&[&Bash, &Zsh, &Fish]))
+        .complete();
+
     let cli = Cli::parse();
     match run(cli) {
         Ok(code) => ExitCode::from(code),

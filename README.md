@@ -23,6 +23,7 @@ items one by one, leave notes, and export them for the pull request.
 
 - [Installation](#installation)
 - [Usage](#usage)
+- [Shell completion](#shell-completion)
 - [What a review looks like](#what-a-review-looks-like)
 - [Citations](#citations)
 - [Glossary](#glossary)
@@ -93,6 +94,30 @@ errors, `1` on warnings, `0` otherwise.
 
 Approvals and notes live under `$XDG_STATE_HOME/openspec-reviewer/`, per
 repository and change. `--no-state` ignores them.
+
+## Shell completion
+
+The binary is its own completer, so a change name completes from the
+`openspec/changes/` of whichever repository the shell is in. Put the
+binary on `PATH` first, then add one line:
+
+```sh
+# bash, in ~/.bashrc
+source <(COMPLETE=bash openspec-reviewer)
+
+# zsh, in ~/.zshrc
+source <(COMPLETE=zsh openspec-reviewer)
+
+# fish, in ~/.config/fish/config.fish
+COMPLETE=fish openspec-reviewer | source
+```
+
+`change <name>` offers the open changes, `git <ref>` and `--base` the
+heads and tags, `gh <pr>` the open pull requests with their titles, and
+everything else — subcommands, flags, `--format` values — comes from the
+command tree. The pull request lookup gives `gh` one second and then
+gives up, so a slow network costs candidates, never the prompt.
+
 ## What a review looks like
 
 A delta that restates a requirement to change one sentence, add two
