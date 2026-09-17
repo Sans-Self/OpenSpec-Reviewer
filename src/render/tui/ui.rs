@@ -27,6 +27,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(vertical[0]);
     app.detail_height = panes[1].height.saturating_sub(2);
+    app.refresh_detail();
 
     if app.history_state().is_some() {
         draw_history(frame, app, panes[0], panes[1], palette);
@@ -280,6 +281,66 @@ pub fn styled_line(line: &DiffLine, palette: Palette, marks: Option<&Marks>) -> 
     Line::from(spans)
 }
 
+/// The lines of a pane that can reach the screen at its scroll offset.
+/// A line above the offset becomes an empty placeholder, which keeps
+/// ratatui's idea of the text the same height without styling anything; a
+/// line at or beyond the last visible row is never built at all. Styling a
+/// line costs a pass of every glossary matcher over it, so a pane over a
+/// long spec is most of a frame.
+struct Viewport {
+    first: usize,
+    end: usize,
+    at: usize,
+    lines: Vec<Line<'static>>,
+}
+
+impl Viewport {
+    /// `wraps` is whether the pane wraps its lines. A wrapped line can
+    /// occupy more than one row and so pushes what follows it down; the
+    /// window then has to open at the top, and only the tail is cut.
+    fn new(scroll: u16, height: u16, wraps: bool) -> Viewport {
+        let scroll = usize::from(scroll);
+        Viewport {
+            first: if wraps { 0 } else { scroll },
+            end: scroll.saturating_add(usize::from(height)),
+            at: 0,
+            lines: Vec::new(),
+        }
+    }
+
+    /// Whether the window has been filled, after which nothing more is
+    /// built.
+    fn full(&self) -> bool {
+        self.at >= self.end
+    }
+
+    fn push(&mut self, build: impl FnOnce() -> Line<'static>) {
+        if self.full() {
+            return;
+        }
+        let line = if self.at < self.first {
+            Line::raw("")
+        } else {
+            build()
+        };
+        self.lines.push(line);
+        self.at += 1;
+    }
+
+    fn extend(&mut self, count: usize, build: impl Fn(usize) -> Line<'static>) {
+        for i in 0..count {
+            if self.full() {
+                return;
+            }
+            self.push(|| build(i));
+        }
+    }
+
+    fn text(self) -> Text<'static> {
+        Text::from(self.lines)
+    }
+}
+
 fn severity_style(s: Severity, palette: Palette) -> Style {
     match s {
         Severity::Error => palette.error(),
@@ -288,25 +349,48 @@ fn severity_style(s: Severity, palette: Palette) -> Style {
     }
 }
 
+/// A finding as two or more lines: the message, then its details.
+fn finding_lines(f: &crate::review::Finding, palette: Palette) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!("{}: ", f.severity),
+            severity_style(f.severity, palette),
+        ),
+        Span::raw(f.message.clone()),
+    ])];
+    lines.extend(
+        f.details
+            .iter()
+            .map(|d| Line::styled(format!("    {d}"), palette.muted())),
+    );
+    lines
+}
+
+fn push_all(vp: &mut Viewport, lines: Vec<Line<'static>>) {
+    for line in lines {
+        vp.push(|| line);
+    }
+}
+
 fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
-    let marks = app.review.glossary.marks();
+    let marks = app.marks();
     let Some(row) = app.current_row() else {
         return Text::raw("nothing to review");
     };
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut vp = Viewport::new(
+        app.scroll,
+        app.detail_height,
+        app.mode == DetailMode::Inline,
+    );
     if let Some(p) = app.pairing_at(row) {
         match app.mode {
-            DetailMode::Inline => lines.extend(
-                app.detail_lines()
-                    .iter()
-                    .map(|l| styled_line(l, palette, Some(&marks))),
-            ),
-            DetailMode::SideBySide => lines.extend(side_by_side(
-                &app.detail_lines(),
-                width,
-                palette,
-                Some(&marks),
-            )),
+            DetailMode::Inline => {
+                let lines = app.detail_lines();
+                vp.extend(lines.len(), |i| styled_line(&lines[i], palette, marks));
+            }
+            DetailMode::SideBySide => {
+                side_by_side(app.detail_lines(), width, palette, marks, &mut vp)
+            }
             DetailMode::Raw => {
                 let before = p
                     .before
@@ -318,37 +402,23 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                     .as_ref()
                     .map(raw_text)
                     .unwrap_or_else(|| "(no after side)".to_string());
-                lines.extend(two_columns(&before, &after, width, palette, Some(&marks)));
+                two_columns(&before, &after, width, palette, marks, &mut vp);
             }
         }
-        lines.push(Line::raw(""));
+        vp.push(|| Line::raw(""));
         if approval(p) == crate::state::ApprovalStatus::Stale {
-            lines.push(Line::styled(
-                "[~] text changed since approval",
-                palette.warning(),
-            ));
+            vp.push(|| Line::styled("[~] text changed since approval", palette.warning()));
         }
         for f in &p.findings {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{}: ", f.severity),
-                    severity_style(f.severity, palette),
-                ),
-                Span::raw(f.message.clone()),
-            ]));
-            lines.extend(
-                f.details
-                    .iter()
-                    .map(|d| Line::styled(format!("    {d}"), palette.muted())),
-            );
+            push_all(&mut vp, finding_lines(f, palette));
         }
         for note in &p.notes {
-            lines.extend(note_lines(note, palette));
+            push_all(&mut vp, note_lines(note, palette));
         }
-        lines.push(Line::styled(history_summary(p), palette.muted()));
+        vp.push(|| Line::styled(history_summary(p), palette.muted()));
         if app.definitions_shown() {
-            lines.push(Line::raw(""));
-            lines.push(Line::styled("definitions", palette.heading()));
+            vp.push(|| Line::raw(""));
+            vp.push(|| Line::styled("definitions", palette.heading()));
             let text = p
                 .after
                 .as_ref()
@@ -357,75 +427,74 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                 .unwrap_or_default();
             let terms = app.review.glossary.terms_in(&text);
             if terms.is_empty() {
-                lines.push(Line::styled(
-                    "  no glossary term appears here",
-                    palette.muted(),
-                ));
+                vp.push(|| Line::styled("  no glossary term appears here", palette.muted()));
             }
             for t in terms {
-                lines.push(Line::styled(
-                    format!("  {}", t.name),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ));
+                vp.push(|| {
+                    Line::styled(
+                        format!("  {}", t.name),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )
+                });
                 for l in crate::review::normalize::paragraphs(&t.meaning) {
-                    lines.push(Line::raw(format!("    {l}")));
+                    vp.push(|| Line::raw(format!("    {l}")));
                 }
                 if !t.admitted.is_empty() {
-                    lines.push(Line::styled("    Admitted:", palette.muted()));
+                    vp.push(|| Line::styled("    Admitted:", palette.muted()));
                     for a in &t.admitted {
-                        lines.push(Line::styled(format!("      {a}"), palette.muted()));
+                        vp.push(|| Line::styled(format!("      {a}"), palette.muted()));
                     }
                 }
                 if !t.deprecated.is_empty() {
-                    lines.push(Line::styled("    Deprecated:", palette.muted()));
+                    vp.push(|| Line::styled("    Deprecated:", palette.muted()));
                     for d in &t.deprecated {
-                        lines.push(Line::styled(format!("      {d}"), palette.muted()));
+                        vp.push(|| Line::styled(format!("      {d}"), palette.muted()));
                     }
                 }
             }
         }
     } else if let Some((p, m)) = app.scenario_at(row) {
-        lines.extend(
-            app.detail_lines()
-                .iter()
-                .map(|l| styled_line(l, palette, Some(&marks))),
-        );
-        lines.push(Line::raw(""));
+        let lines = app.detail_lines();
+        vp.extend(lines.len(), |i| styled_line(&lines[i], palette, marks));
+        vp.push(|| Line::raw(""));
         for f in p
             .findings
             .iter()
             .filter(|f| f.location.scenario.as_deref() == Some(m.name()))
         {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{}: ", f.severity),
-                    severity_style(f.severity, palette),
-                ),
-                Span::raw(f.message.clone()),
-            ]));
+            vp.push(|| {
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", f.severity),
+                        severity_style(f.severity, palette),
+                    ),
+                    Span::raw(f.message.clone()),
+                ])
+            });
         }
         if let Some(note) = p.scenario_note(m.name()) {
-            lines.extend(note_lines(note, palette));
+            push_all(&mut vp, note_lines(note, palette));
         }
     } else if let Some(a) = app.artefact_at(row) {
-        lines.extend(
-            a.lines()
-                .iter()
-                .map(|l| styled_line(l, palette, Some(&marks))),
-        );
+        let lines = app.detail_lines();
+        vp.extend(lines.len(), |i| styled_line(&lines[i], palette, marks));
         if let Some(note) = &a.state.note {
-            lines.push(Line::raw(""));
-            lines.push(Line::styled("✎ note", palette.heading()));
-            lines.extend(note.text.lines().map(|l| Line::raw(format!("  {l}"))));
+            vp.push(|| Line::raw(""));
+            vp.push(|| Line::styled("✎ note", palette.heading()));
+            for l in note.text.lines() {
+                vp.push(|| Line::raw(format!("  {l}")));
+            }
             if a.note_outdated() {
-                lines.push(Line::styled(
-                    "  text changed since the note was written",
-                    palette.warning(),
-                ));
+                vp.push(|| {
+                    Line::styled(
+                        "  text changed since the note was written",
+                        palette.warning(),
+                    )
+                });
             }
         }
     }
-    Text::from(lines)
+    vp.text()
 }
 
 fn raw_text(req: &crate::model::Requirement) -> String {
@@ -449,33 +518,32 @@ fn side_by_side(
     width: u16,
     palette: Palette,
     marks: Option<&Marks>,
-) -> Vec<Line<'static>> {
+    vp: &mut Viewport,
+) {
     let half = (usize::from(width).saturating_sub(3) / 2).max(8);
-    lines
-        .iter()
-        .map(|l| {
-            let left = l.side(SpanMark::Added);
-            let right = l.side(SpanMark::Removed);
-            let style_for = |present: bool| match (l.kind, present) {
-                (ParaKind::Added, true) => palette.added(),
-                (ParaKind::Removed, true) => palette.removed(),
-                (ParaKind::Changed, true) => palette.changed(),
-                _ => Style::default(),
-            };
-            let column = |text: Option<&str>, present: bool| {
-                let text = fit(text.unwrap_or(""), half);
-                let occurrences = occurrences_of(marks, &text);
-                marked_spans(&text, 0, &occurrences, style_for(present), palette)
-            };
-            let mut spans = column(left.as_deref(), left.is_some());
-            spans.push(Span::styled(
-                format!(" {} ", l.kind.glyph()),
-                palette.muted(),
-            ));
-            spans.extend(column(right.as_deref(), right.is_some()));
-            Line::from(spans)
-        })
-        .collect()
+    vp.extend(lines.len(), |i| {
+        let l = &lines[i];
+        let left = l.side(SpanMark::Added);
+        let right = l.side(SpanMark::Removed);
+        let style_for = |present: bool| match (l.kind, present) {
+            (ParaKind::Added, true) => palette.added(),
+            (ParaKind::Removed, true) => palette.removed(),
+            (ParaKind::Changed, true) => palette.changed(),
+            _ => Style::default(),
+        };
+        let column = |text: Option<&str>, present: bool| {
+            let text = fit(text.unwrap_or(""), half);
+            let occurrences = occurrences_of(marks, &text);
+            marked_spans(&text, 0, &occurrences, style_for(present), palette)
+        };
+        let mut spans = column(left.as_deref(), left.is_some());
+        spans.push(Span::styled(
+            format!(" {} ", l.kind.glyph()),
+            palette.muted(),
+        ));
+        spans.extend(column(right.as_deref(), right.is_some()));
+        Line::from(spans)
+    });
 }
 
 fn two_columns(
@@ -484,23 +552,22 @@ fn two_columns(
     width: u16,
     palette: Palette,
     marks: Option<&Marks>,
-) -> Vec<Line<'static>> {
+    vp: &mut Viewport,
+) {
     let half = (usize::from(width).saturating_sub(3) / 2).max(8);
     let l: Vec<&str> = left.lines().collect();
     let r: Vec<&str> = right.lines().collect();
-    (0..l.len().max(r.len()))
-        .map(|i| {
-            let column = |text: &str| {
-                let text = fit(text, half);
-                let occurrences = occurrences_of(marks, &text);
-                marked_spans(&text, 0, &occurrences, Style::default(), palette)
-            };
-            let mut spans = column(l.get(i).copied().unwrap_or(""));
-            spans.push(Span::styled(" │ ", palette.muted()));
-            spans.extend(column(r.get(i).copied().unwrap_or("")));
-            Line::from(spans)
-        })
-        .collect()
+    vp.extend(l.len().max(r.len()), |i| {
+        let column = |text: &str| {
+            let text = fit(text, half);
+            let occurrences = occurrences_of(marks, &text);
+            marked_spans(&text, 0, &occurrences, Style::default(), palette)
+        };
+        let mut spans = column(l.get(i).copied().unwrap_or(""));
+        spans.push(Span::styled(" │ ", palette.muted()));
+        spans.extend(column(r.get(i).copied().unwrap_or("")));
+        Line::from(spans)
+    });
 }
 
 fn draw_detail(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
@@ -561,13 +628,11 @@ fn draw_history(frame: &mut Frame, app: &App, left: Rect, right: Rect, palette: 
         HistoryMode::Version => "version",
         HistoryMode::DiffToPrevious => "diff to previous",
     };
-    let marks = app.review.glossary.marks();
-    let lines: Vec<Line<'static>> = app
-        .history_lines()
-        .iter()
-        .map(|l| styled_line(l, palette, Some(&marks)))
-        .collect();
-    let paragraph = Paragraph::new(Text::from(lines))
+    let marks = app.marks();
+    let lines = app.history_lines();
+    let mut vp = Viewport::new(h.scroll, right.height.saturating_sub(2), true);
+    vp.extend(lines.len(), |i| styled_line(&lines[i], palette, marks));
+    let paragraph = Paragraph::new(vp.text())
         .block(Block::default().borders(Borders::ALL).title(title))
         .wrap(Wrap { trim: false })
         .scroll((h.scroll, 0));

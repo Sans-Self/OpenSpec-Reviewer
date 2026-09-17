@@ -129,7 +129,10 @@ impl Matcher {
         }
     }
 
-    fn cleaned(text: &str) -> String {
+    /// Citations blanked out, so a requirement name inside a `spec:` tag
+    /// never counts as usage. Blanking pads instead of removing, so an
+    /// offset into the result is an offset into `text`.
+    pub fn cleaned(text: &str) -> String {
         Grammar::blank(text)
     }
 
@@ -147,8 +150,15 @@ impl Matcher {
     /// comparable ranges, which is what lets a longer phrase shield a
     /// shorter one inside it.
     pub fn ranges(&self, text: &str) -> Vec<Range<usize>> {
+        self.ranges_cleaned(&Matcher::cleaned(text))
+    }
+
+    /// The same over text a caller has already blanked. A reader running
+    /// many matchers over one text blanks once and calls this, which is
+    /// where the cost of a glossary lives.
+    pub fn ranges_cleaned(&self, cleaned: &str) -> Vec<Range<usize>> {
         self.re
-            .find_iter(&Matcher::cleaned(text))
+            .find_iter(cleaned)
             .map(|m| m.start()..m.end())
             .collect()
     }
