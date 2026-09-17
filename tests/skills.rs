@@ -61,7 +61,10 @@ fn skills_install_into_the_repository__fresh_install() {
     let text = installed(&repo, "workflow");
     let (front, body) = split(&text).unwrap();
     assert!(front.contains("name: opsx-reviewer-workflow"));
-    assert!(front.contains("generatedBy: openspec-reviewer 0.1.0"));
+    assert!(front.contains(&format!(
+        "generatedBy: openspec-reviewer {}",
+        env!("CARGO_PKG_VERSION")
+    )));
     assert_eq!(recorded_checksum(&text), Some(checksum(body).as_str()));
     for name in TASK_SKILLS {
         installed(&repo, name);
