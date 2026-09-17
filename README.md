@@ -150,6 +150,13 @@ since. In the interactive view the same rows sit in a list on the left
 with the diff on the right; `Space` folds a requirement's scenarios open,
 `e` writes a note in a popup over the diff, and `?` lists the keys.
 
+`N` puts every note of the change on one screen, each row naming its
+anchor, quoting the note's first line and marking the ones whose words
+have moved since. `Enter` goes to the note's row, unfolding the
+requirement when the note hangs on one of its scenarios. `d` deletes the
+selected note and `X` clears every note of the change, after a `y`/`n`
+confirmation. Both touch the state file only: approvals stay.
+
 ## Citations
 
 Specs cite evidence and tests cite specs. A test title, a comment or a
