@@ -66,3 +66,40 @@ reason = "the stand-in regression test in the scenario for a cited test that is 
 [[lint.ignore_evidence]]
 commit = "deadbeef"
 reason = "the stand-in hash in the scenario for a cited commit that is not in the repository"
+
+# Words the notes-panel scenarios quote as examples or keys, not concepts.
+
+[[definitions.ignore]]
+term   = "N"
+in     = ["notes-panel", "review-tui § Keys follow vi and arrow conventions"]
+reason = "the key that opens the panel"
+
+[[definitions.ignore]]
+term   = "Enter"
+in     = ["notes-panel"]
+reason = "the key that jumps to a note's row"
+
+[[definitions.ignore]]
+term   = "no notes"
+in     = ["notes-panel"]
+reason = "the panel's copy when it is empty"
+
+[[definitions.ignore]]
+term   = "keys"
+in     = ["notes-panel"]
+reason = "an example capability name in the scenarios"
+
+[[definitions.ignore]]
+term   = "Rotation"
+in     = ["notes-panel"]
+reason = "an example requirement name in the scenarios"
+
+[[definitions.ignore]]
+term   = "Expired key"
+in     = ["notes-panel"]
+reason = "an example scenario name in the scenarios"
+
+[[definitions.ignore]]
+term   = "keys § Rotation"
+in     = ["notes-panel"]
+reason = "an example anchor label built from the names above"
