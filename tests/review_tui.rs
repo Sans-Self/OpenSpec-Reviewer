@@ -139,7 +139,7 @@ fn the_view_is_a_list_and_a_detail_pane() {
         .filter(|r| matches!(r, Row::Capability { .. }))
         .all(|r| !r.selectable()));
 
-    let screen = render(&mut app, 120, 30);
+    let screen = render(&mut app, 160, 30);
     assert!(
         screen.contains("[ ] ~ Flat index of all routes and pages"),
         "{screen}"
@@ -155,7 +155,7 @@ fn the_view_is_a_list_and_a_detail_pane() {
 fn the_view_is_a_list_and_a_detail_pane__requirement_with_an_error() {
     let repo = tui_repo();
     let mut app = app_for(&repo);
-    let screen = render(&mut app, 120, 30);
+    let screen = render(&mut app, 160, 30);
     assert!(screen.contains("~ Flat index of all routes !"), "{screen}");
 }
 
@@ -209,7 +209,7 @@ fn the_status_line_shows_progress() {
         app.handle_key(key(KeyCode::Char('j')));
     }
     app.handle_key(key(KeyCode::Char('a')));
-    app.handle_key(key(KeyCode::Char('j')));
+    next_requirement(&mut app);
     app.handle_key(key(KeyCode::Char('a')));
     let status = openspec_reviewer::render::tui::status_text(&app);
     assert!(status.contains("2/5 approved"), "{status}");
@@ -256,7 +256,7 @@ fn keys_follow_vi_and_arrow_conventions__help() {
     let mut app = app_for(&repo);
     app.handle_key(key(KeyCode::Char('?')));
     assert_eq!(app.focus, Focus::Transient(Transient::Help));
-    let screen = render(&mut app, 120, 30);
+    let screen = render(&mut app, 160, 30);
     for (k, _) in openspec_reviewer::render::tui::BINDINGS {
         assert!(screen.contains(k), "help lacks {k}: {screen}");
     }
@@ -348,7 +348,15 @@ fn drop_repo() -> Repo {
     repo
 }
 
-/// Move to the first requirement row and unfold it.
+/// `j` past the open requirement's scenarios onto the next requirement.
+fn next_requirement(app: &mut App) {
+    let from = app.current_pairing().map(|p| p.name.clone());
+    while app.current_pairing().map(|p| p.name.clone()) == from {
+        app.handle_key(key(KeyCode::Char('j')));
+    }
+}
+
+/// Move to the first requirement row and pin it open.
 fn unfold_first(app: &mut App) {
     while !matches!(app.current_row(), Some(Row::Requirement { .. })) {
         app.handle_key(key(KeyCode::Char('j')));
@@ -364,25 +372,25 @@ fn the_view_is_a_list_and_a_detail_pane__scenarios_folded_on_open() {
         !app.rows.iter().any(|r| matches!(r, Row::Scenario { .. })),
         "no scenario row is in the list when the view opens"
     );
-    let screen = render(&mut app, 120, 30);
+    let screen = render(&mut app, 160, 30);
     assert!(
         !screen.contains("Feature mount appears"),
         "a folded requirement hides its scenarios: {screen}"
     );
 
-    unfold_first(&mut app);
+    hover_first(&mut app);
     let scenarios = app
         .rows
         .iter()
         .filter(|r| matches!(r, Row::Scenario { .. }))
         .count();
-    assert_eq!(scenarios, 3, "Space unfolds the requirement's scenarios");
-    let screen = render(&mut app, 120, 30);
+    assert_eq!(scenarios, 3, "the requirement under the cursor is open");
+    let screen = render(&mut app, 160, 30);
     assert!(screen.contains("Feature mount appears"), "{screen}");
-    app.handle_key(key(KeyCode::Char(' ')));
+    app.handle_key(key(KeyCode::Char('k')));
     assert!(
         !app.rows.iter().any(|r| matches!(r, Row::Scenario { .. })),
-        "Space folds them again"
+        "leaving an unpinned requirement folds it"
     );
 }
 
@@ -402,7 +410,7 @@ fn the_view_is_a_list_and_a_detail_pane__a_removed_scenario_has_a_row() {
         .expect("the dropped scenario has a row");
     let (_, m) = app.scenario_at(&dropped).unwrap();
     assert_eq!(m.heading_kind().glyph(), '-', "its glyph is `-`");
-    let screen = render(&mut app, 120, 30);
+    let screen = render(&mut app, 160, 30);
     assert!(screen.contains("- Feature mount appears"), "{screen}");
 }
 
@@ -410,7 +418,6 @@ fn the_view_is_a_list_and_a_detail_pane__a_removed_scenario_has_a_row() {
 fn keys_follow_vi_and_arrow_conventions__jump_into_a_folded_requirement() {
     let repo = drop_repo();
     let mut app = app_for(&repo);
-    assert!(!app.rows.iter().any(|r| matches!(r, Row::Scenario { .. })));
     app.handle_key(key(KeyCode::Char('n')));
     let (_, m) = app
         .current_row()
@@ -437,7 +444,7 @@ fn keys_follow_vi_and_arrow_conventions__approve_from_a_scenario_row() {
         openspec_reviewer::state::ApprovalStatus::Approved,
         "`a` on a scenario row toggles its parent requirement"
     );
-    let screen = render(&mut app, 120, 30);
+    let screen = render(&mut app, 160, 30);
     assert!(
         screen.contains("[√] ~ Flat index of all routes and pages"),
         "{screen}"
@@ -460,7 +467,7 @@ fn a_note_is_written_in_a_popup() {
         "the popup quotes the anchor's body: {:?}",
         edit.quote
     );
-    let screen = render(&mut app, 120, 30);
+    let screen = render(&mut app, 160, 30);
     assert!(screen.contains("writing a note"), "{screen}");
     assert!(
         openspec_reviewer::render::tui::status_text(&app).contains("mode: note"),
@@ -709,4 +716,145 @@ fn glossary_terms_are_marked_where_they_appear__marking_without_colour() {
     let style = span_style(&styled, "group key");
     assert_eq!(style.fg, None, "no colour without colour");
     assert!(underlined(style), "the underline is not a colour");
+}
+
+/// The list pane's part of the screen line holding `text`, cut where the
+/// two pane borders meet. The detail pane repeats the names.
+fn line_with(screen: &str, text: &str) -> String {
+    let top = screen.lines().next().unwrap_or("");
+    let split = top
+        .find("┐┌")
+        .map_or(top.chars().count(), |b| top[..b].chars().count() + 1);
+    screen
+        .lines()
+        .map(|l| l.chars().take(split).collect::<String>())
+        .find(|l| l.contains(text))
+        .unwrap_or_else(|| panic!("no list line holds {text:?}: {screen}"))
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__the_last_requirement_closes_the_branch() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    let screen = render(&mut app, 160, 30);
+    assert!(
+        line_with(&screen, "Flat index of all routes and pages").contains("├─ ▸ [ ] ~"),
+        "{screen}"
+    );
+    assert!(
+        line_with(&screen, "Flat index of all routes !").contains("└─ ▸ [ ] ~"),
+        "{screen}"
+    );
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__roots_hang_from_the_change() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    let screen = render(&mut app, 160, 30);
+    assert!(
+        line_with(&screen, "proposal.md").starts_with("│├─ "),
+        "{screen}"
+    );
+    assert!(
+        line_with(&screen, "tasks.md").starts_with("│├─ "),
+        "{screen}"
+    );
+    assert!(line_with(&screen, "alpha").starts_with("│└─ "), "{screen}");
+}
+
+/// Move the cursor onto the first requirement row without pinning it.
+fn hover_first(app: &mut App) {
+    while !matches!(app.current_row(), Some(Row::Requirement { .. })) {
+        app.handle_key(key(KeyCode::Char('j')));
+    }
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__the_cursor_opens_a_requirement() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    assert!(matches!(app.current_row(), Some(Row::Artefact { .. })));
+    hover_first(&mut app);
+    let scenarios = app
+        .rows
+        .iter()
+        .filter(|r| matches!(r, Row::Scenario { .. }))
+        .count();
+    assert_eq!(scenarios, 3);
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__leaving_folds_an_unpinned_requirement() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    hover_first(&mut app);
+    for _ in 0..4 {
+        app.handle_key(key(KeyCode::Char('j')));
+    }
+    assert!(
+        matches!(app.current_row(), Some(Row::Requirement { index: 1, .. })),
+        "{:?}",
+        app.current_row()
+    );
+    assert!(
+        !app.rows
+            .iter()
+            .any(|r| matches!(r, Row::Scenario { index: 0, .. })),
+        "the first requirement folded"
+    );
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__space_pins_a_requirement_open() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    hover_first(&mut app);
+    app.handle_key(key(KeyCode::Char(' ')));
+    for _ in 0..4 {
+        app.handle_key(key(KeyCode::Char('j')));
+    }
+    assert!(matches!(
+        app.current_row(),
+        Some(Row::Requirement { index: 1, .. })
+    ));
+    let pinned = app
+        .rows
+        .iter()
+        .filter(|r| matches!(r, Row::Scenario { index: 0, .. }))
+        .count();
+    assert_eq!(pinned, 3, "the pinned requirement keeps its scenarios");
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__a_scenario_under_a_requirement_with_a_later_sibling() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    let screen = render(&mut app, 160, 30);
+    assert!(
+        line_with(&screen, "Route-mounted page appears").contains("│  ├─ "),
+        "{screen}"
+    );
+    assert!(
+        line_with(&screen, "Orphan page appears").contains("│  └─ "),
+        "{screen}"
+    );
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__fold_marker_follows_the_cursor() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    let screen = render(&mut app, 160, 30);
+    assert!(
+        line_with(&screen, "Flat index of all routes and pages").contains("▸ [ ]"),
+        "{screen}"
+    );
+    hover_first(&mut app);
+    let screen = render(&mut app, 160, 30);
+    assert!(
+        line_with(&screen, "Flat index of all routes and pages").contains("▾ [ ]"),
+        "{screen}"
+    );
 }

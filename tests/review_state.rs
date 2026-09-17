@@ -40,6 +40,14 @@ fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
 }
 
+/// `j` past the open requirement's scenarios onto the next requirement.
+fn next_requirement(app: &mut App) {
+    let from = app.current_pairing().map(|p| p.name.clone());
+    while app.current_pairing().map(|p| p.name.clone()) == from {
+        app.handle_key(key('j'));
+    }
+}
+
 fn app_for(repo: &Repo, change: &str) -> App {
     let snap = openspec_reviewer::source::ChangeSource {
         root: repo.root().into(),
@@ -135,7 +143,7 @@ fn state_persists_between_runs() {
     {
         let mut app = app_for(&repo, "foo");
         app.handle_key(key('a'));
-        app.handle_key(key('j'));
+        next_requirement(&mut app);
         app.handle_key(key('a'));
     }
     let app = app_for(&repo, "foo");
@@ -219,7 +227,7 @@ fn plain_output_includes_state() {
     let mut app = app_for(&repo, "foo");
     app.handle_key(key('a'));
     app.set_current_note(Some("first note".into()));
-    app.handle_key(key('j'));
+    next_requirement(&mut app);
     app.set_current_note(Some("second note\nwith two lines".into()));
 
     let json: serde_json::Value =

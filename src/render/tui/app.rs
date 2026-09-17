@@ -232,11 +232,15 @@ fn all_rows(review: &Review) -> Vec<Row> {
     rows
 }
 
-fn visible_rows(review: &Review, unfolded: &BTreeSet<Anchor>) -> Vec<Row> {
+/// The rows the list shows: every row but the scenarios of requirements
+/// that are neither pinned nor under the cursor.
+fn visible_rows(review: &Review, pinned: &BTreeSet<Anchor>, hovered: Option<Anchor>) -> Vec<Row> {
     all_rows(review)
         .into_iter()
         .filter(|row| match row {
-            Row::Scenario { .. } => row.anchor().is_some_and(|a| unfolded.contains(&a)),
+            Row::Scenario { .. } => row
+                .anchor()
+                .is_some_and(|a| pinned.contains(&a) || hovered == Some(a)),
             _ => true,
         })
         .collect()
@@ -244,9 +248,9 @@ fn visible_rows(review: &Review, unfolded: &BTreeSet<Anchor>) -> Vec<Row> {
 
 impl App {
     pub fn new(review: Review, stores: BTreeMap<String, Store>) -> App {
-        let rows = visible_rows(&review, &BTreeSet::new());
+        let rows = visible_rows(&review, &BTreeSet::new(), None);
         let cursor = rows.iter().position(Row::selectable).unwrap_or(0);
-        App {
+        let mut app = App {
             review,
             rows,
             cursor,
@@ -260,7 +264,9 @@ impl App {
             detail_height: 20,
             definitions_open: BTreeSet::new(),
             unfolded: BTreeSet::new(),
-        }
+        };
+        app.rebuild_rows();
+        app
     }
 
     /// `D`: toggle the definitions panel for the current pairing.
@@ -379,11 +385,22 @@ impl App {
         self.rows.iter().position(|r| r == row)
     }
 
-    /// Rebuild the list after a fold, keeping the cursor on the row it was
-    /// on, or on that row's requirement when the fold hid it.
+    /// Whether a requirement shows its scenarios: pinned with `Space`, or
+    /// the cursor is on it or inside it.
+    pub fn is_open(&self, anchor: Anchor) -> bool {
+        self.unfolded.contains(&anchor) || self.hovered() == Some(anchor)
+    }
+
+    fn hovered(&self) -> Option<Anchor> {
+        self.current_row().and_then(Row::anchor)
+    }
+
+    /// Rebuild the list after a fold or a cursor move, keeping the cursor
+    /// on the row it was on, or on that row's requirement when the fold
+    /// hid it.
     fn rebuild_rows(&mut self) {
         let keep = self.current_row().cloned();
-        self.rows = visible_rows(&self.review, &self.unfolded);
+        self.rows = visible_rows(&self.review, &self.unfolded, self.hovered());
         self.cursor = keep
             .and_then(|row| {
                 self.index_of(&row).or_else(|| {
@@ -394,7 +411,7 @@ impl App {
             .unwrap_or_else(|| self.rows.iter().position(Row::selectable).unwrap_or(0));
     }
 
-    /// `Space`: fold or unfold the scenarios of the requirement the cursor
+    /// `Space`: pin or unpin the scenarios of the requirement the cursor
     /// is on or inside.
     fn toggle_fold(&mut self) {
         let Some(anchor) = self.current_row().and_then(Row::anchor) else {
@@ -425,6 +442,7 @@ impl App {
         if self.rows[i].selectable() {
             self.cursor = i;
             self.scroll = 0;
+            self.rebuild_rows();
         }
     }
 
@@ -476,10 +494,7 @@ impl App {
         else {
             return;
         };
-        if let (Row::Scenario { .. }, Some(anchor)) = (&target, target.anchor()) {
-            self.unfolded.insert(anchor);
-        }
-        self.rows = visible_rows(&self.review, &self.unfolded);
+        self.rows = visible_rows(&self.review, &self.unfolded, target.anchor());
         if let Some(i) = self.index_of(&target) {
             self.cursor = i;
             self.scroll = 0;

@@ -103,3 +103,33 @@ reason = "an example scenario name in the scenarios"
 term   = "keys § Rotation"
 in     = ["notes-panel"]
 reason = "an example anchor label built from the names above"
+
+[[definitions.ignore]]
+term = "Space"
+in = ["review-tui § The view is a list and a detail pane"]
+reason = "Key name; the binding is defined in the keys requirement."
+
+[[definitions.ignore]]
+term = "├─"
+in = ["review-tui"]
+reason = "Tree guide glyph, defined where it is used."
+
+[[definitions.ignore]]
+term = "└─"
+in = ["review-tui"]
+reason = "Tree guide glyph, defined where it is used."
+
+[[definitions.ignore]]
+term = "│"
+in = ["review-tui"]
+reason = "Tree guide glyph, defined where it is used."
+
+[[definitions.ignore]]
+term = "▸"
+in = ["review-tui"]
+reason = "Fold marker glyph, defined where it is used."
+
+[[definitions.ignore]]
+term = "▾"
+in = ["review-tui"]
+reason = "Fold marker glyph, defined where it is used."

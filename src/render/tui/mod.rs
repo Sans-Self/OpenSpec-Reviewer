@@ -1,6 +1,7 @@
 //! The interactive view: a list on the left, a detail pane on the right.
 
 mod app;
+mod tree;
 mod ui;
 
 pub use app::{

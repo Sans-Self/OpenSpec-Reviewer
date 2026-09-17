@@ -147,7 +147,9 @@ Findings, the notes and a one-line history follow each requirement. A
 note anchors to the requirement or to one of its scenarios, prints its
 anchor, and says so when the words it was written about have changed
 since. In the interactive view the same rows sit in a list on the left
-with the diff on the right; `Space` folds a requirement's scenarios open,
+with the diff on the right as a tree with guides. The requirement under
+the cursor shows its scenarios (`▾`) and folds again when you leave it
+(`▸`); `Space` pins it open,
 `e` writes a note in a popup over the diff, and `?` lists the keys.
 
 ## Citations
