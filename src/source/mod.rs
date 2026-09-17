@@ -4,6 +4,7 @@
 mod archive;
 mod canon;
 mod change;
+pub mod complete;
 mod diff;
 mod gh;
 mod git;
