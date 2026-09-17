@@ -20,7 +20,7 @@ fn pair(canon_text: &str, delta_text: &str) -> openspec_reviewer::review::Pairin
 }
 
 #[test]
-fn every_delta_entry_pairs_with_canon_by_name() {
+fn every_delta_entry_matches_canon_by_name() {
     let p = pair(
         ALPHA_CANON,
         "## MODIFIED Requirements\n\n### Requirement: Index rows are ordered by path\n\nRows MUST be ordered by path.\n\n#### Scenario: Paths sort alphabetically\n\n- **WHEN** x\n- **THEN** y\n",
@@ -33,7 +33,7 @@ fn every_delta_entry_pairs_with_canon_by_name() {
 }
 
 #[test]
-fn every_delta_entry_pairs_with_canon_by_name__same_name_in_a_different_capability() {
+fn every_delta_entry_matches_canon_by_name__same_name_in_a_different_capability() {
     let mut canon = canon_of("beta", ALPHA_CANON);
     canon.specs.insert("alpha".into(), Vec::new());
     let delta = delta_of(

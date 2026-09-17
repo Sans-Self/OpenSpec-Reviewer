@@ -70,12 +70,13 @@ parse error that names the file and the heading.
 - **THEN** it fails
 - **AND** the error names the file and the heading
 
-### Requirement: A rename is a pair of names
+### Requirement: A rename reads a FROM line and a TO line
 
-Under `## RENAMED Requirements` the tool MUST read pairs of `- FROM:` and
-`- TO:` lines. Each line carries a backticked `### Requirement: <name>`
-heading. The pair yields a RENAMED entry with the old and new name. A
-`FROM` without a following `TO`, or the reverse, is a parse error.
+Under `## RENAMED Requirements` the tool MUST read `- FROM:` and `- TO:`
+lines in twos. Each line carries a backticked `### Requirement: <name>`
+heading. The two together yield a RENAMED entry with the old and new
+name. A `FROM` without a following `TO`, or the reverse, is a parse
+error.
 
 #### Scenario: One rename
 
@@ -165,4 +166,3 @@ differ only in what they report from it.
 - **WHEN** the lint builds the register
 - **AND** a review of one change builds the register
 - **THEN** the two registers hold the same entries
-

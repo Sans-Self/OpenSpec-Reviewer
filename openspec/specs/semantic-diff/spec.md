@@ -3,28 +3,6 @@
 ## Purpose
 TBD - created by archiving change reviewer-foundation. Update Purpose after archive.
 ## Requirements
-### Requirement: Every delta entry pairs with canon by name
-
-The tool MUST pair each delta entry with the canon requirement of the same
-name in the same capability. A MODIFIED, REMOVED or RENAMED entry pairs
-with the canon requirement it names. An ADDED entry has no canon side.
-
-#### Scenario: Modified requirement found in canon
-
-- **GIVEN** a MODIFIED entry naming a requirement canon has in that
-  capability
-- **WHEN** the tool pairs the entry
-- **THEN** the pairing's before side is the canon text
-- **AND** its after side is the delta text
-
-#### Scenario: Same name in a different capability
-
-- **GIVEN** a MODIFIED entry naming a requirement that exists only in
-  another capability
-- **WHEN** the tool pairs the entry
-- **THEN** the pairing has no before side
-- **AND** the review reports it as modified without canon
-
 ### Requirement: Text is normalized before comparison
 
 Before comparing, the tool MUST join the lines of each paragraph into one
@@ -122,7 +100,7 @@ under the old name and the after side.
 - **GIVEN** A renamed to B
 - **AND** B's body differing from A's by one word
 - **WHEN** the tool renders the pairing
-- **THEN** it shows the name pair
+- **THEN** it shows both names
 - **AND** a body diff marking that one word
 
 ### Requirement: Artefacts are shown as line diffs
@@ -143,4 +121,26 @@ unmarked.
 - **GIVEN** a snapshot from the `change` source
 - **WHEN** the tool renders an artefact
 - **THEN** it shows the file in full, unmarked
+
+### Requirement: Every delta entry matches canon by name
+
+The tool MUST match each delta entry to the canon requirement of the same
+name in the same capability. A MODIFIED, REMOVED or RENAMED entry matches
+the canon requirement it names. An ADDED entry has no canon side.
+
+#### Scenario: Modified requirement found in canon
+
+- **GIVEN** a MODIFIED entry naming a requirement canon has in that
+  capability
+- **WHEN** the tool matches the entry
+- **THEN** the pairing's before side is the canon text
+- **AND** its after side is the delta text
+
+#### Scenario: Same name in a different capability
+
+- **GIVEN** a MODIFIED entry naming a requirement that exists only in
+  another capability
+- **WHEN** the tool matches the entry
+- **THEN** the pairing has no before side
+- **AND** the review reports it as modified without canon
 
