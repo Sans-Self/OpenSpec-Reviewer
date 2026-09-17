@@ -130,22 +130,22 @@ impl Matcher {
     }
 
     fn cleaned(text: &str) -> String {
-        Grammar::strip(text)
+        Grammar::blank(text)
     }
 
     pub fn is_match(&self, text: &str) -> bool {
         self.re.is_match(&Matcher::cleaned(text))
     }
 
-    /// Byte offset of the first hit in the citation-stripped text; only the
-    /// order of offsets is meaningful.
+    /// Byte offset of the first hit, indexing `text` itself.
     pub fn first(&self, text: &str) -> Option<usize> {
         self.re.find(&Matcher::cleaned(text)).map(|m| m.start())
     }
 
-    /// The byte range of every hit in the citation-stripped text. Two
-    /// matchers run over the same text yield comparable ranges, which is
-    /// what lets a longer phrase shield a shorter one inside it.
+    /// The byte range of every hit, indexing `text` itself, so a caller can
+    /// mark what it found. Two matchers run over the same text yield
+    /// comparable ranges, which is what lets a longer phrase shield a
+    /// shorter one inside it.
     pub fn ranges(&self, text: &str) -> Vec<Range<usize>> {
         self.re
             .find_iter(&Matcher::cleaned(text))

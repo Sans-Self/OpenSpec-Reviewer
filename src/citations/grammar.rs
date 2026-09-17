@@ -122,4 +122,18 @@ impl Grammar {
             .replace_all(&without_spans, "")
             .into_owned()
     }
+
+    /// The same, with each citation replaced by spaces of its own byte
+    /// length instead of removed. An offset into the result is an offset
+    /// into `text`, which is what lets a caller mark what it found.
+    pub fn blank(text: &str) -> String {
+        let pad = |c: &regex::Captures| " ".repeat(c[0].len());
+        let without_spans = Regex::new(SPAN)
+            .expect("span grammar compiles")
+            .replace_all(text, pad);
+        Regex::new(LITERAL)
+            .expect("literal grammar compiles")
+            .replace_all(&without_spans, pad)
+            .into_owned()
+    }
 }

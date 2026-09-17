@@ -73,31 +73,6 @@ focused border is bold and the other is plain.
 - **THEN** the detail pane's border has the accent colour
 - **AND** the list pane's border is dim
 
-### Requirement: Glossary terms are highlighted in the detail text
-
-In colour mode every glossary term in the detail text MUST be underlined
-where it appears, and every deprecated synonym MUST be painted in the
-warning colour where it appears. Highlighting composes with a tint or a
-change modifier. In non-colour mode terms are underlined and synonyms
-are bold.
-
-#### Scenario: Term inside an added line
-
-- **GIVEN** colour mode
-- **AND** a glossary term `group key`
-- **AND** an added paragraph containing it
-- **WHEN** the view renders
-- **THEN** the cells of `group key` are underlined
-- **AND** those cells keep the green background
-
-#### Scenario: Synonym in a scenario
-
-- **GIVEN** colour mode
-- **AND** a deprecated synonym `admin`
-- **AND** a scenario line containing it
-- **WHEN** the view renders
-- **THEN** the cells of `admin` have the warning colour
-
 ### Requirement: The status bar colours non-zero counts
 
 In colour mode the status bar MUST paint the errors count in the error

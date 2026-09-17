@@ -2,12 +2,14 @@
 //! Pure: built from canon plus the change's own delta, checked as values.
 
 pub mod checks;
+pub mod marks;
 pub mod synonyms;
 
 pub use checks::{
     deprecated_in_canon, deprecated_in_pairings, new_undefined, recurring_undefined, span_sites,
     term_in_use, unbound_terms, unused_terms, CanonHit, Recurring,
 };
+pub use marks::{Mark, Marks, Occurrence};
 pub use synonyms::{parse_markers, Markers, Matcher};
 
 /// Whether a term's body opens with the binding line that names it.

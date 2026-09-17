@@ -22,9 +22,7 @@
       wdiff marks; non-colour unchanged.
 - [ ] 3.2 List markers, approval marks and delta glyphs in their roles.
 - [ ] 3.3 Focused border in the accent colour, the other dim.
-- [ ] 3.4 Term underline and synonym colour in the detail text through
-      the matcher's offsets.
-- [ ] 3.5 Status bar counts coloured when non-zero.
+- [ ] 3.4 Status bar counts coloured when non-zero.
 
 ## 4. Text outputs
 

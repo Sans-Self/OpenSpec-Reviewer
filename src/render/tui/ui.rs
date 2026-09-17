@@ -4,6 +4,7 @@ use super::app::{
     history_entries, App, DetailMode, Focus, HistoryMode, Modal, NoteEdit, Pane, Row, Transient,
     BINDINGS,
 };
+use crate::glossary::{Mark, Marks, Occurrence};
 use crate::render::colour::Palette;
 use crate::render::{approval, finding_marker, history_summary, note_marker};
 use crate::review::{AnchoredNote, DiffLine, LineRole, ParaKind, Severity, SpanMark};
@@ -151,10 +152,68 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-pub fn styled_line(line: &DiffLine, palette: Palette) -> Line<'static> {
+/// The style a glossary occurrence adds. Underline is orthogonal to the
+/// diff's colours, so it composes instead of replacing them; a deprecated
+/// synonym also takes the warning style, because a word that must change
+/// outranks how it changed.
+fn mark_style(mark: Mark, base: Style, palette: Palette) -> Style {
+    let underlined = base.add_modifier(Modifier::UNDERLINED);
+    match mark {
+        Mark::Admitted => underlined,
+        Mark::Deprecated(_) => underlined.patch(palette.warning()),
+    }
+}
+
+/// `text` split on the occurrences that fall inside it. `from` is where
+/// `text` starts in the string the occurrences were found in.
+fn marked_spans(
+    text: &str,
+    from: usize,
+    occurrences: &[Occurrence],
+    style: Style,
+    palette: Palette,
+) -> Vec<Span<'static>> {
+    let end = from + text.len();
+    let mut out = Vec::new();
+    let mut at = from;
+    for o in occurrences {
+        if o.range.end <= at || o.range.start >= end {
+            continue;
+        }
+        let start = o.range.start.max(at);
+        let stop = o.range.end.min(end);
+        if start > at {
+            out.push(Span::styled(
+                text[at - from..start - from].to_string(),
+                style,
+            ));
+        }
+        out.push(Span::styled(
+            text[start - from..stop - from].to_string(),
+            mark_style(o.mark, style, palette),
+        ));
+        at = stop;
+    }
+    if at < end {
+        out.push(Span::styled(text[at - from..].to_string(), style));
+    }
+    out
+}
+
+/// The glossary occurrences of a whole string, for a caller that draws it
+/// in one piece.
+fn occurrences_of<'a>(marks: Option<&'a Marks>, text: &str) -> Vec<Occurrence<'a>> {
+    marks.map(|m| m.occurrences(text)).unwrap_or_default()
+}
+
+pub fn styled_line(line: &DiffLine, palette: Palette, marks: Option<&Marks>) -> Line<'static> {
     if line.spans.is_empty() {
         return Line::raw("");
     }
+    // Occurrences are found over the line's own text, so a term that
+    // straddles two diff spans is marked in both halves.
+    let plain: String = line.spans.iter().map(|s| s.text.as_str()).collect();
+    let occurrences = occurrences_of(marks, &plain);
     let glyph = Span::styled(
         format!("{} ", line.kind.glyph()),
         match line.kind {
@@ -172,6 +231,7 @@ pub fn styled_line(line: &DiffLine, palette: Palette) -> Line<'static> {
         Style::default()
     };
     let mut spans = vec![glyph];
+    let mut at = 0;
     for s in &line.spans {
         let (prefix, suffix, style) = match (line.kind, s.mark) {
             (ParaKind::Changed, SpanMark::Removed) => ("[-", "-]", palette.removed()),
@@ -181,10 +241,15 @@ pub fn styled_line(line: &DiffLine, palette: Palette) -> Line<'static> {
             (ParaKind::Separator, _) => ("", "", palette.muted()),
             _ => ("", "", base),
         };
-        spans.push(Span::styled(
-            format!("{prefix}{}{suffix}", s.text),
-            style.patch(base),
-        ));
+        let style = style.patch(base);
+        if !prefix.is_empty() {
+            spans.push(Span::styled(prefix.to_string(), style));
+        }
+        spans.extend(marked_spans(&s.text, at, &occurrences, style, palette));
+        if !suffix.is_empty() {
+            spans.push(Span::styled(suffix.to_string(), style));
+        }
+        at += s.text.len();
     }
     Line::from(spans)
 }
@@ -198,18 +263,24 @@ fn severity_style(s: Severity, palette: Palette) -> Style {
 }
 
 fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
+    let marks = app.review.glossary.marks();
     let Some(row) = app.current_row() else {
         return Text::raw("nothing to review");
     };
     let mut lines: Vec<Line<'static>> = Vec::new();
     if let Some(p) = app.pairing_at(row) {
         match app.mode {
-            DetailMode::Inline => {
-                lines.extend(app.detail_lines().iter().map(|l| styled_line(l, palette)))
-            }
-            DetailMode::SideBySide => {
-                lines.extend(side_by_side(&app.detail_lines(), width, palette))
-            }
+            DetailMode::Inline => lines.extend(
+                app.detail_lines()
+                    .iter()
+                    .map(|l| styled_line(l, palette, Some(&marks))),
+            ),
+            DetailMode::SideBySide => lines.extend(side_by_side(
+                &app.detail_lines(),
+                width,
+                palette,
+                Some(&marks),
+            )),
             DetailMode::Raw => {
                 let before = p
                     .before
@@ -221,7 +292,7 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                     .as_ref()
                     .map(raw_text)
                     .unwrap_or_else(|| "(no after side)".to_string());
-                lines.extend(two_columns(&before, &after, width, palette));
+                lines.extend(two_columns(&before, &after, width, palette, Some(&marks)));
             }
         }
         lines.push(Line::raw(""));
@@ -288,7 +359,11 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
             }
         }
     } else if let Some((p, m)) = app.scenario_at(row) {
-        lines.extend(app.detail_lines().iter().map(|l| styled_line(l, palette)));
+        lines.extend(
+            app.detail_lines()
+                .iter()
+                .map(|l| styled_line(l, palette, Some(&marks))),
+        );
         lines.push(Line::raw(""));
         for f in p
             .findings
@@ -307,7 +382,11 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
             lines.extend(note_lines(note, palette));
         }
     } else if let Some(a) = app.artefact_at(row) {
-        lines.extend(a.lines().iter().map(|l| styled_line(l, palette)));
+        lines.extend(
+            a.lines()
+                .iter()
+                .map(|l| styled_line(l, palette, Some(&marks))),
+        );
         if let Some(note) = &a.state.note {
             lines.push(Line::raw(""));
             lines.push(Line::styled("✎ note", palette.heading()));
@@ -339,7 +418,12 @@ fn fit(text: &str, width: usize) -> String {
     s
 }
 
-fn side_by_side(lines: &[DiffLine], width: u16, palette: Palette) -> Vec<Line<'static>> {
+fn side_by_side(
+    lines: &[DiffLine],
+    width: u16,
+    palette: Palette,
+    marks: Option<&Marks>,
+) -> Vec<Line<'static>> {
     let half = (usize::from(width).saturating_sub(3) / 2).max(8);
     lines
         .iter()
@@ -352,32 +436,43 @@ fn side_by_side(lines: &[DiffLine], width: u16, palette: Palette) -> Vec<Line<'s
                 (ParaKind::Changed, true) => palette.changed(),
                 _ => Style::default(),
             };
-            Line::from(vec![
-                Span::styled(
-                    fit(left.as_deref().unwrap_or(""), half),
-                    style_for(left.is_some()),
-                ),
-                Span::styled(format!(" {} ", l.kind.glyph()), palette.muted()),
-                Span::styled(
-                    fit(right.as_deref().unwrap_or(""), half),
-                    style_for(right.is_some()),
-                ),
-            ])
+            let column = |text: Option<&str>, present: bool| {
+                let text = fit(text.unwrap_or(""), half);
+                let occurrences = occurrences_of(marks, &text);
+                marked_spans(&text, 0, &occurrences, style_for(present), palette)
+            };
+            let mut spans = column(left.as_deref(), left.is_some());
+            spans.push(Span::styled(
+                format!(" {} ", l.kind.glyph()),
+                palette.muted(),
+            ));
+            spans.extend(column(right.as_deref(), right.is_some()));
+            Line::from(spans)
         })
         .collect()
 }
 
-fn two_columns(left: &str, right: &str, width: u16, palette: Palette) -> Vec<Line<'static>> {
+fn two_columns(
+    left: &str,
+    right: &str,
+    width: u16,
+    palette: Palette,
+    marks: Option<&Marks>,
+) -> Vec<Line<'static>> {
     let half = (usize::from(width).saturating_sub(3) / 2).max(8);
     let l: Vec<&str> = left.lines().collect();
     let r: Vec<&str> = right.lines().collect();
     (0..l.len().max(r.len()))
         .map(|i| {
-            Line::from(vec![
-                Span::raw(fit(l.get(i).copied().unwrap_or(""), half)),
-                Span::styled(" │ ", palette.muted()),
-                Span::raw(fit(r.get(i).copied().unwrap_or(""), half)),
-            ])
+            let column = |text: &str| {
+                let text = fit(text, half);
+                let occurrences = occurrences_of(marks, &text);
+                marked_spans(&text, 0, &occurrences, Style::default(), palette)
+            };
+            let mut spans = column(l.get(i).copied().unwrap_or(""));
+            spans.push(Span::styled(" │ ", palette.muted()));
+            spans.extend(column(r.get(i).copied().unwrap_or("")));
+            Line::from(spans)
         })
         .collect()
 }
@@ -440,10 +535,11 @@ fn draw_history(frame: &mut Frame, app: &App, left: Rect, right: Rect, palette: 
         HistoryMode::Version => "version",
         HistoryMode::DiffToPrevious => "diff to previous",
     };
+    let marks = app.review.glossary.marks();
     let lines: Vec<Line<'static>> = app
         .history_lines()
         .iter()
-        .map(|l| styled_line(l, palette))
+        .map(|l| styled_line(l, palette, Some(&marks)))
         .collect();
     let paragraph = Paragraph::new(Text::from(lines))
         .block(Block::default().borders(Borders::ALL).title(title))
