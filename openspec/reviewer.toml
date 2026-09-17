@@ -186,12 +186,12 @@ reason = "The reply prefix of OSC 11."
 
 [[definitions.ignore]]
 term = "default"
-in = ["tui-color", "user-config", "review-tui"]
+in = ["tui-color", "user-config"]
 reason = "Palette name, enumerated in Three palettes."
 
 [[definitions.ignore]]
 term = "accessible"
-in = ["tui-color", "user-config", "review-tui"]
+in = ["tui-color", "user-config"]
 reason = "Palette name, enumerated in Three palettes."
 
 [[definitions.ignore]]
