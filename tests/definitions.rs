@@ -852,3 +852,85 @@ fn a_change_that_introduces_an_undefined_term_is_a_warning__ignored_in_one_pairi
         "one use is left, and once is not enough"
     );
 }
+
+/// A repository whose glossary has one word sitting inside another: the
+/// `shielding` fixture, with `lineage`'s admitted synonym under the
+/// caller's control.
+fn shielding_repo(lineage_admits: &str) -> Repo {
+    let definitions = fixture("shielding", "definitions.md").replace(
+        "- **Admitted:** lineage anchor",
+        &format!("- **Admitted:** {lineage_admits}"),
+    );
+    let repo = Repo::new();
+    repo.canon("definitions", &definitions)
+        .canon("key-rotation", &fixture("shielding", "key-rotation.md"))
+        .delta(
+            "retire-rotation-key",
+            "definitions",
+            &fixture("shielding", "delta.md"),
+        )
+        .write(
+            "openspec/changes/retire-rotation-key/proposal.md",
+            "# retire-rotation-key\n",
+        )
+        .write("openspec/reviewer.toml", "[lint]\n");
+    repo
+}
+
+/// The `capability § requirement` of every deprecated-synonym warning the
+/// lint reports, paired with the synonym it names.
+fn lint_synonym_hits(repo: &Repo) -> Vec<String> {
+    stdout(&run_in(repo.root(), &["lint"]))
+        .lines()
+        .filter(|l| l.contains("uses deprecated synonym"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn a_deprecated_synonym_in_a_spec_is_a_warning__synonym_is_the_tail_of_a_term_name() {
+    let hits = lint_synonym_hits(&shielding_repo("lineage anchor"));
+    assert!(
+        !hits
+            .iter()
+            .any(|l| l.contains("Directory operations are signed by their own key")),
+        "`PLC rotation key` is a term of its own: {hits:#?}"
+    );
+}
+
+#[test]
+fn a_deprecated_synonym_in_a_spec_is_a_warning__synonym_outside_the_term_name_that_contains_it() {
+    let hits = lint_synonym_hits(&shielding_repo("lineage anchor"));
+    let own: Vec<_> = hits
+        .iter()
+        .filter(|l| l.contains("Rotation replaces the wrap"))
+        .collect();
+    assert_eq!(own.len(), 1, "{hits:#?}");
+    assert!(
+        own[0].contains("uses deprecated synonym `rotation key`, the term is `group key`"),
+        "{}",
+        own[0]
+    );
+}
+
+#[test]
+fn a_deprecated_synonym_in_a_spec_is_a_warning__synonym_shielded_by_an_admitted_phrase() {
+    let hits = lint_synonym_hits(&shielding_repo("lineage anchor"));
+    assert!(
+        !hits
+            .iter()
+            .any(|l| l.contains("Records resolve through their chain")),
+        "`lineage anchor` is admitted for `lineage`: {hits:#?}"
+    );
+}
+
+#[test]
+fn a_deprecated_synonym_in_a_spec_is_a_warning__a_one_word_admitted_synonym_does_not_shield() {
+    let hits = lint_synonym_hits(&shielding_repo("anchor"));
+    assert!(
+        hits.iter()
+            .any(|l| l.contains("Records resolve through their chain")
+                && l.contains("uses deprecated synonym `anchor`")),
+        "one word cannot shield, or the admission silences the deprecation: {hits:#?}"
+    );
+}

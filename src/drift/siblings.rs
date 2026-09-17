@@ -2,14 +2,14 @@
 //! old names, then decide per hit whether the change already handles it.
 
 use super::filter::filter_terms;
-use super::terms::{contains_phrase, removed_terms, words, RemovedTerm, Tier};
+use super::terms::{contains_phrase, prose, removed_terms, words, RemovedTerm, Tier};
 use crate::citations::Grammar;
 use crate::model::{Canon, DeltaKind, DeltaSpec, Requirement};
 use crate::review::pair::requirement_text;
 use crate::review::{Finding, FindingKind, Pairing, Sibling};
 
 fn phrase_text(req: &Requirement) -> String {
-    words(&requirement_text(req)).join(" ")
+    words(&prose(req)).join(" ")
 }
 
 fn mentions(term: &RemovedTerm, req: &Requirement) -> bool {
@@ -108,8 +108,8 @@ pub fn drift_findings(
     if let DeltaKind::Renamed { from } = &p.kind {
         let needle = from.to_lowercase();
         for (cap, req) in others() {
-            let prose = Grammar::strip(&requirement_text(req)).to_lowercase();
-            if !prose.contains(&needle) {
+            let text = Grammar::strip(&requirement_text(req)).to_lowercase();
+            if !text.contains(&needle) {
                 continue;
             }
             if let Some(Some(after)) = delta_after(deltas, cap, &req.name) {

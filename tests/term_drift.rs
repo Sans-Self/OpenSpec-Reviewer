@@ -316,3 +316,60 @@ fn drift_findings_carry_their_locations__detail_pane() {
         "{screen}"
     );
 }
+
+#[test]
+fn a_pairing_yields_the_terms_it_removes__word_dropped_from_a_deprecated_line() {
+    let terms = terms_of(
+        "The key that wraps content keys.\n\n- **Deprecated:** workspace key, rotation key",
+        Some("The key that wraps content keys.\n\n- **Deprecated:** workspace key"),
+    );
+    assert!(
+        terms.iter().all(|t| t.tier != Tier::Phrase),
+        "a marker line is a list, not a sentence: {terms:?}"
+    );
+}
+
+#[test]
+fn a_removed_term_found_in_a_sibling_is_a_warning__sibling_names_the_phrase_on_a_deprecated_line() {
+    let mut canon = drift_canon();
+    canon.specs.insert(
+        "definitions".into(),
+        vec![req(
+            "group key",
+            "A spec MUST use `group key` to mean:\nThe key that wraps content keys.\n\n- **Deprecated:** grace window closes",
+            &[],
+        )],
+    );
+    let findings = drift(&canon, vec![fixture_delta()]);
+    assert!(
+        findings
+            .iter()
+            .all(|f| !f.message.contains("definitions § group key")),
+        "a term that retires a word is not a sibling using it: {findings:#?}"
+    );
+}
+
+#[test]
+fn a_pairing_yields_the_terms_it_removes__word_dropped_from_a_deprecated_line_end_to_end() {
+    let repo = Repo::new();
+    repo.canon("definitions", &fixture("shielding", "definitions.md"))
+        .canon("key-rotation", &fixture("shielding", "key-rotation.md"))
+        .delta(
+            "retire-rotation-key",
+            "definitions",
+            &fixture("shielding", "delta.md"),
+        )
+        .write(
+            "openspec/changes/retire-rotation-key/proposal.md",
+            "# retire-rotation-key\n",
+        )
+        .write("openspec/reviewer.toml", "[lint]\n");
+    let text = stdout(&run_in(
+        repo.root(),
+        &["--findings-only", "change", "retire-rotation-key"],
+    ));
+    assert!(
+        !text.contains("sibling mentions removed term"),
+        "retiring a word from a Deprecated line is not a sentence rewrite: {text}"
+    );
+}
