@@ -4,6 +4,7 @@ use super::app::{
     history_entries, App, DetailMode, Focus, HistoryMode, Modal, NoteEdit, Pane, Row, Transient,
     BINDINGS,
 };
+use super::tree;
 use crate::glossary::{Mark, Marks, Occurrence};
 use crate::render::colour::Palette;
 use crate::render::{approval, finding_marker, history_summary, note_marker};
@@ -41,23 +42,27 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn row_line(app: &App, row: &Row, palette: Palette) -> Line<'static> {
+fn row_line(app: &App, row: &Row, prefix: &str, palette: Palette) -> Line<'static> {
+    let guide = Span::styled(prefix.to_string(), palette.muted());
     match row {
         Row::Change { change } => Line::styled(
             format!("change {}", app.review.changes[*change].name),
             palette.heading(),
         ),
-        Row::Capability { change, capability } => Line::styled(
-            format!(
-                "  {}",
-                app.review.changes[*change].capabilities[*capability].name
+        Row::Capability { change, capability } => Line::from(vec![
+            guide,
+            Span::styled(
+                app.review.changes[*change].capabilities[*capability]
+                    .name
+                    .clone(),
+                palette.heading().add_modifier(Modifier::UNDERLINED),
             ),
-            palette.heading().add_modifier(Modifier::UNDERLINED),
-        ),
+        ]),
         Row::Artefact { .. } => {
             let a = app.artefact_at(row).expect("artefact row");
             let mark = a.state.status(a.text_hash()).mark();
             Line::from(vec![
+                guide,
                 Span::raw(format!("{mark} ")),
                 Span::styled("· ", palette.muted()),
                 Span::raw(a.artefact.name.clone()),
@@ -77,7 +82,8 @@ fn row_line(app: &App, row: &Row, palette: Palette) -> Line<'static> {
                 _ => Style::default(),
             };
             Line::from(vec![
-                Span::raw(format!("    {} ", approval(p).mark())),
+                guide,
+                Span::raw(format!("{} {} ", fold_marker(app, row), approval(p).mark())),
                 Span::styled(format!("{} ", p.kind.glyph()), glyph_style),
                 Span::raw(p.name.clone()),
                 Span::raw(" "),
@@ -104,10 +110,10 @@ fn row_line(app: &App, row: &Row, palette: Palette) -> Line<'static> {
                 Some(Severity::Warning) => ("?", palette.warning()),
                 _ => ("", Style::default()),
             };
-            // No approval mark: the blank column says approval is per
-            // requirement without needing a legend.
+            // Neither fold marker nor approval mark: both belong to the
+            // requirement, and the guide already says whose scenario it is.
             Line::from(vec![
-                Span::raw("        ".to_string()),
+                guide,
                 Span::styled(format!("{} ", kind.glyph()), glyph_style),
                 Span::raw(m.name().to_string()),
                 Span::raw(" "),
@@ -134,11 +140,32 @@ fn note_lines(note: &AnchoredNote, palette: Palette) -> Vec<Line<'static>> {
     lines
 }
 
+/// `▸` or `▾` says what `Space` does on this row; a requirement without
+/// scenarios draws a space so the approval marks stay in one column.
+fn fold_marker(app: &App, row: &Row) -> &'static str {
+    let has_scenarios = app
+        .pairing_at(row)
+        .is_some_and(|p| !p.diff.scenarios.is_empty());
+    match row.anchor() {
+        Some(anchor) if has_scenarios => {
+            if app.unfolded.contains(&anchor) {
+                "▾"
+            } else {
+                "▸"
+            }
+        }
+        _ => " ",
+    }
+}
+
 fn draw_list(frame: &mut Frame, app: &App, area: Rect, palette: Palette) {
+    let multi = app.review.changes.len() > 1;
+    let guides = tree::guides(&app.rows, multi);
     let items: Vec<ListItem> = app
         .rows
         .iter()
-        .map(|row| ListItem::new(row_line(app, row, palette)))
+        .zip(&guides)
+        .map(|(row, prefix)| ListItem::new(row_line(app, row, prefix, palette)))
         .collect();
     let title = if app.pane == Pane::List {
         "[items]"

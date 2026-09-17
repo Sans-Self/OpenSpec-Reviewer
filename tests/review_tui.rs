@@ -710,3 +710,65 @@ fn glossary_terms_are_marked_where_they_appear__marking_without_colour() {
     assert_eq!(style.fg, None, "no colour without colour");
     assert!(underlined(style), "the underline is not a colour");
 }
+
+/// The list pane's part of the screen line holding `text`, at the 40/60
+/// split of a 120-column terminal. The detail pane repeats the names.
+fn line_with(screen: &str, text: &str) -> String {
+    screen
+        .lines()
+        .map(|l| l.chars().take(48).collect::<String>())
+        .find(|l| l.contains(text))
+        .unwrap_or_else(|| panic!("no list line holds {text:?}: {screen}"))
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__the_last_requirement_closes_the_branch() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    let screen = render(&mut app, 120, 30);
+    assert!(
+        line_with(&screen, "Flat index of all routes and pages").contains("├─ ▸ [ ] ~"),
+        "{screen}"
+    );
+    assert!(
+        line_with(&screen, "Flat index of all routes !").contains("└─ ▸ [ ] ~"),
+        "{screen}"
+    );
+    assert!(
+        !line_with(&screen, "proposal.md").contains('─'),
+        "roots draw no connector: {screen}"
+    );
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__a_scenario_under_a_requirement_with_a_later_sibling() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    unfold_first(&mut app);
+    let screen = render(&mut app, 120, 30);
+    assert!(
+        line_with(&screen, "Route-mounted page appears").contains("│  ├─ "),
+        "{screen}"
+    );
+    assert!(
+        line_with(&screen, "Orphan page appears").contains("│  └─ "),
+        "{screen}"
+    );
+}
+
+#[test]
+fn the_view_is_a_list_and_a_detail_pane__fold_marker_follows_space() {
+    let repo = tui_repo();
+    let mut app = app_for(&repo);
+    let screen = render(&mut app, 120, 30);
+    assert!(
+        line_with(&screen, "Flat index of all routes and pages").contains("▸ [ ]"),
+        "{screen}"
+    );
+    unfold_first(&mut app);
+    let screen = render(&mut app, 120, 30);
+    assert!(
+        line_with(&screen, "Flat index of all routes and pages").contains("▾ [ ]"),
+        "{screen}"
+    );
+}
