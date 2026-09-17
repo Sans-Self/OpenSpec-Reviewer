@@ -9,7 +9,7 @@ use super::history::HistoryEntry;
 use super::normalize::{normalized, text_hash};
 use super::ArtefactReview;
 use crate::model::{Canon, Change, DeltaKind, DeltaSpec, Requirement, Scenario};
-use crate::state::{item_key, ItemState, Note};
+use crate::state::{item_key, ItemState, Note, Posted};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -24,6 +24,9 @@ pub struct AnchoredNote {
     pub outdated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at: Option<String>,
+    /// Where this note stands as a comment, once it does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub posted: Option<Posted>,
 }
 
 impl AnchoredNote {
@@ -33,6 +36,7 @@ impl AnchoredNote {
             outdated: note.is_outdated(anchor_hash),
             text: note.text,
             at: note.at,
+            posted: note.posted,
         }
     }
 

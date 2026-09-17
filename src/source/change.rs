@@ -75,6 +75,7 @@ impl Source for ChangeSource {
         Ok(Snapshot {
             files,
             origin: format!("change {}", self.name),
+            pull_request: None,
         })
     }
 }

@@ -2,43 +2,43 @@
 
 ## 1. The pull request on the snapshot
 
-- [ ] 1.1 `source::PullRequest { number, url, head }` and
+- [x] 1.1 `source::PullRequest { number, url, head }` and
       `Snapshot.pull_request: Option<PullRequest>`; `Review` carries it
       and keeps the snapshot's `FileChange`s.
-- [ ] 1.2 `GhSource::fetch` runs `gh pr view <pr> --json
+- [x] 1.2 `GhSource::fetch` runs `gh pr view <pr> --json
       number,url,headRefOid` before `gh pr diff` and fills the field; a
       failing `gh pr view` is the same error as a failing diff.
 
 ## 2. The state
 
-- [ ] 2.1 `state::Posted { at, url }` and `Note.posted`, serialized
+- [x] 2.1 `state::Posted { at, url }` and `Note.posted`, serialized
       only when present; older files load with `None`.
-- [ ] 2.2 `Store::mark_posted(keys, url)` stamps the given notes.
+- [x] 2.2 `Store::mark_posted(keys, url)` stamps the given notes.
 
 ## 3. The planner
 
-- [ ] 3.1 `review::post::plan(review, stores) -> Option<ReviewPost>`:
+- [x] 3.1 `review::post::plan(review, stores) -> Option<ReviewPost>`:
       the unposted notes, each located to a path and line from the
       after texts where a heading is found, the rest in the body;
       `None` when there is nothing to post.
-- [ ] 3.2 `ReviewPost::payload(head) -> serde_json::Value` in GitHub's
+- [x] 3.2 `ReviewPost::payload(head) -> serde_json::Value` in GitHub's
       shape, and `ReviewPost::into_body_only()` for the retry.
 
 ## 4. Posting
 
-- [ ] 4.1 `source::gh::post_review(root, pr, payload) -> Result<String,
+- [x] 4.1 `source::gh::post_review(root, pr, payload) -> Result<String,
       SourceError>` running `gh api repos/<owner>/<repo>/pulls/<n>/reviews
       --input -` and returning the review's `html_url`; a `422` triggers
       the body-only retry once.
 
 ## 5. The view
 
-- [ ] 5.1 `Modal::Quit` with the count and the pull request number;
+- [x] 5.1 `Modal::Quit` with the count and the pull request number;
       `y`, `n`, `Esc` and `Ctrl-C` as designed; the quit keys open it
       only when the review has a pull request and unposted notes exist.
-- [ ] 5.2 `Effect::PostNotes` handled in the event loop: post, stamp
+- [x] 5.2 `Effect::PostNotes` handled in the event loop: post, stamp
       the notes, quit; or set the status message and stay.
-- [ ] 5.3 The detail pane shows `posted <date>` under a posted note.
+- [x] 5.3 The detail pane shows `posted <date>` under a posted note.
 
 ## 6. Tests and docs
 

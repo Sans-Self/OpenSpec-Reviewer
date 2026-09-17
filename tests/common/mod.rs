@@ -70,6 +70,7 @@ pub fn snapshot(files: Vec<(&str, Option<&str>, Option<&str>)>) -> Snapshot {
             })
             .collect(),
         origin: "test".to_string(),
+        pull_request: None,
     }
 }
 
