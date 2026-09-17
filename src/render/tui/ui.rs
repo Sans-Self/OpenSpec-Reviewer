@@ -1,14 +1,16 @@
 //! Drawing. Every mark carries a glyph; the palette only adds colour.
 
 use super::app::{
-    history_entries, App, DetailMode, Focus, HistoryMode, Modal, NoteEdit, Pane, Row, Transient,
-    BINDINGS,
+    history_entries, App, DetailMode, Focus, HistoryMode, Modal, NoteEdit, Pane, QuitPrompt, Row,
+    Transient, BINDINGS,
 };
 use super::tree;
 use crate::glossary::{Mark, Marks, Occurrence};
 use crate::render::colour::Palette;
 use crate::render::{approval, finding_marker, history_summary, note_marker};
-use crate::review::{AnchoredNote, DiffLine, LineRole, ParaKind, Severity, SpanMark};
+use crate::review::{
+    AnchoredNote, DiffLine, LineRole, ParaKind, Severity, SpanMark, OUTDATED_NOTE,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -42,6 +44,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     match &app.focus {
         Focus::Transient(Transient::Help) => draw_help(frame, area, palette),
         Focus::Modal(Modal::Note(edit)) => draw_note(frame, edit, panes[1], palette),
+        Focus::Modal(Modal::Quit(prompt)) => draw_quit(frame, *prompt, area, palette),
         _ => {}
     }
 }
@@ -137,8 +140,14 @@ fn note_lines(note: &AnchoredNote, palette: Palette) -> Vec<Line<'static>> {
     lines.extend(note.text.lines().map(|l| Line::raw(format!("  {l}"))));
     if note.outdated {
         lines.push(Line::styled(
-            "  text changed since the note was written",
+            format!("  {OUTDATED_NOTE}"),
             palette.warning(),
+        ));
+    }
+    if let Some(posted) = &note.posted {
+        lines.push(Line::styled(
+            format!("  posted {}", posted.date()),
+            palette.muted(),
         ));
     }
     lines
@@ -488,12 +497,10 @@ fn detail_text(app: &App, palette: Palette, width: u16) -> Text<'static> {
                 vp.push(|| Line::raw(format!("  {l}")));
             }
             if a.note_outdated() {
-                vp.push(|| {
-                    Line::styled(
-                        "  text changed since the note was written",
-                        palette.warning(),
-                    )
-                });
+                vp.push(|| Line::styled(format!("  {OUTDATED_NOTE}"), palette.warning()));
+            }
+            if let Some(posted) = &note.posted {
+                vp.push(|| Line::styled(format!("  posted {}", posted.date()), palette.muted()));
             }
         }
     }
@@ -759,6 +766,38 @@ fn draw_confirm_clear(frame: &mut Frame, count: usize, area: Rect, palette: Pale
     frame.render_widget(
         Paragraph::new(Text::from(lines))
             .block(Block::default().borders(Borders::ALL).title("clear notes")),
+        popup,
+    );
+}
+
+/// The quit prompt. It names the count and the pull request, so the answer
+/// is given to a question that says what it would do.
+fn draw_quit(frame: &mut Frame, prompt: QuitPrompt, area: Rect, palette: Palette) {
+    let notes = match prompt.notes {
+        1 => "1 note is not posted".to_string(),
+        n => format!("{n} notes are not posted"),
+    };
+    let lines = vec![
+        Line::raw(format!("{notes} to pull request {}.", prompt.pull_request)),
+        Line::raw(""),
+        Line::styled(
+            "y post them and quit   n quit without posting   Esc back to the review",
+            palette.muted(),
+        ),
+    ];
+    let width = 76.min(area.width);
+    let height = (lines.len() as u16 + 2).min(area.height);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::ALL).title("quit")),
         popup,
     );
 }

@@ -5,8 +5,8 @@ mod tree;
 mod ui;
 
 pub use app::{
-    App, DetailMode, Effect, Focus, HistoryMode, Modal, NoteEdit, NoteRow, NotesState, Pane, Row,
-    Transient, BINDINGS,
+    App, DetailMode, Effect, Focus, HistoryMode, Modal, NoteEdit, NoteRow, NotesState, Pane,
+    QuitPrompt, Row, Transient, BINDINGS,
 };
 pub use ui::{draw, status_text, styled_line};
 
@@ -16,6 +16,7 @@ use crossterm::event::{self, Event, KeyEventKind};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use std::collections::BTreeMap;
 use std::io;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,16 +34,17 @@ fn install_signal_flag() -> io::Result<Arc<AtomicBool>> {
 
 /// Run the view until the user quits. `ratatui::init` installs a panic
 /// hook that restores the terminal before the message prints.
-pub fn run(review: Review, stores: BTreeMap<String, Store>) -> io::Result<()> {
+pub fn run(root: &Path, review: Review, stores: BTreeMap<String, Store>) -> io::Result<()> {
     let mut app = App::new(review, stores);
     let interrupted = install_signal_flag()?;
     let mut terminal = ratatui::try_init()?;
-    let result = event_loop(&mut terminal, &mut app, &interrupted);
+    let result = event_loop(root, &mut terminal, &mut app, &interrupted);
     ratatui::restore();
     result
 }
 
 fn event_loop(
+    root: &Path,
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
     interrupted: &AtomicBool,
@@ -61,8 +63,10 @@ fn event_loop(
         }
         match event::read()? {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
-                if let Some(app::Effect::EscalateNote) = app.handle_key(key) {
-                    escalate_to_editor(terminal, app)?;
+                match app.handle_key(key) {
+                    Some(app::Effect::EscalateNote) => escalate_to_editor(terminal, app)?,
+                    Some(app::Effect::PostNotes) => post_notes(root, app),
+                    None => {}
                 }
                 dirty = true;
             }
@@ -71,6 +75,45 @@ fn event_loop(
         }
     }
     Ok(())
+}
+
+/// `y` in the quit prompt: send the unposted notes, stamp them and leave.
+/// A failure keeps the view open with gh's own words in the status line,
+/// because the notes are safe locally and a retry costs nothing.
+pub fn post_notes(root: &Path, app: &mut App) {
+    let (Some(pr), Some(post)) = (app.review.pull_request.clone(), app.unposted_notes()) else {
+        app.quit = true;
+        return;
+    };
+    match crate::source::post_review(root, &pr, &post) {
+        Ok(url) => {
+            stamp(app, &post, &url);
+            app.quit = true;
+        }
+        Err(e) => {
+            app.focus = Focus::Browsing;
+            app.message = Some(e.to_string());
+        }
+    }
+}
+
+/// Record the review every sent note now stands in, one store at a time.
+fn stamp(app: &mut App, post: &crate::review::post::ReviewPost, url: &str) {
+    let mut by_change: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (change, key) in &post.keys {
+        by_change
+            .entry(change.clone())
+            .or_default()
+            .push(key.clone());
+    }
+    for (change, keys) in by_change {
+        let Some(store) = app.stores.get_mut(&change) else {
+            continue;
+        };
+        if let Err(e) = store.mark_posted(&keys, url) {
+            app.message = Some(e.to_string());
+        }
+    }
 }
 
 /// `^E`: leave the alternate screen, run the editor on the popup's buffer,

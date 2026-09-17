@@ -17,6 +17,22 @@ pub struct Approval {
     pub at: String,
 }
 
+/// Where a note stands as a comment: when it was posted, and the review
+/// it was posted in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Posted {
+    /// RFC 3339.
+    pub at: String,
+    pub url: String,
+}
+
+impl Posted {
+    /// The date alone, which is what a pane under a note has room for.
+    pub fn date(&self) -> &str {
+        self.at.get(..10).unwrap_or(&self.at)
+    }
+}
+
 /// One free-text note, on a requirement or on one of its scenarios,
 /// together with the text it was written about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +46,11 @@ pub struct Note {
     /// RFC 3339.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at: Option<String>,
+    /// Absent until the note reaches the pull request, and absent again
+    /// after an edit: `Note::new` builds a fresh note, so saving a new
+    /// text makes it unposted without a rule of its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub posted: Option<Posted>,
 }
 
 /// What a state file may hold for a note: today's record, or the bare
@@ -43,6 +64,8 @@ enum NoteRepr {
         text_hash: Option<u64>,
         #[serde(default)]
         at: Option<String>,
+        #[serde(default)]
+        posted: Option<Posted>,
     },
     Bare(String),
 }
@@ -54,15 +77,18 @@ impl From<NoteRepr> for Note {
                 text,
                 text_hash,
                 at,
+                posted,
             } => Note {
                 text,
                 text_hash,
                 at,
+                posted,
             },
             NoteRepr::Bare(text) => Note {
                 text,
                 text_hash: None,
                 at: None,
+                posted: None,
             },
         }
     }
@@ -74,6 +100,7 @@ impl Note {
             text,
             text_hash: Some(anchor_hash),
             at: Some(time::now_rfc3339()),
+            posted: None,
         }
     }
 
@@ -277,6 +304,27 @@ impl Store {
         self.state.items.retain(|_, item| !item.is_empty());
         self.save()?;
         Ok(cleared)
+    }
+
+    /// Stamp every named note as posted in the review at `url`. A key with
+    /// no note is skipped: the reviewer may have deleted it while gh was
+    /// running, and a posted record on nothing helps nobody.
+    pub fn mark_posted(&mut self, keys: &[String], url: &str) -> Result<(), StateError> {
+        let at = time::now_rfc3339();
+        for key in keys {
+            if let Some(note) = self
+                .state
+                .items
+                .get_mut(key)
+                .and_then(|item| item.note.as_mut())
+            {
+                note.posted = Some(Posted {
+                    at: at.clone(),
+                    url: url.to_string(),
+                });
+            }
+        }
+        self.save()
     }
 
     /// Store a note against `anchor_hash`, the hash of the text it is

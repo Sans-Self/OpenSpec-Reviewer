@@ -5,6 +5,7 @@ pub mod findings;
 pub mod history;
 pub mod normalize;
 pub mod pair;
+pub mod post;
 
 pub use diff::{
     diff_lines, diff_requirements, DiffLine, LineRole, ParaKind, RequirementDiff, ScenarioMatch,
@@ -17,9 +18,13 @@ pub use pair::{
 };
 
 use crate::model::Artefact;
-use crate::source::FileChange;
+use crate::source::{FileChange, PullRequest, Snapshot};
 use crate::state::ItemState;
 use serde::Serialize;
+
+/// What a renderer says under a note whose anchor has moved, and what a
+/// posted comment ends with for the same reason.
+pub const OUTDATED_NOTE: &str = "text changed since the note was written";
 
 /// An artefact row: `proposal.md`, `design.md` or `tasks.md`.
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +99,14 @@ pub struct Review {
     /// review says what the lint says about a dangling ignore entry.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<crate::citations::LintFinding>,
+    /// The snapshot's files, kept so a note can be anchored to the line its
+    /// heading stands on in the text under review.
+    #[serde(skip)]
+    pub files: Vec<FileChange>,
+    /// Absent unless the review came from a pull request, which is what
+    /// makes posting possible at all.
+    #[serde(skip)]
+    pub pull_request: Option<PullRequest>,
 }
 
 fn terms_only<S: serde::Serializer>(
@@ -113,7 +126,25 @@ impl Review {
             summary,
             glossary: crate::glossary::Glossary::default(),
             notices: Vec::new(),
+            files: Vec::new(),
+            pull_request: None,
         }
+    }
+
+    /// The snapshot behind the review: its files, which anchoring reads,
+    /// and its pull request, which posting needs.
+    pub fn with_snapshot(mut self, snapshot: &Snapshot) -> Review {
+        self.files = snapshot.files.clone();
+        self.pull_request = snapshot.pull_request.clone();
+        self
+    }
+
+    /// The after text of one path, as the snapshot leaves it.
+    pub fn after_text(&self, path: &str) -> Option<&str> {
+        self.files
+            .iter()
+            .find(|f| f.path.to_string_lossy() == path)
+            .and_then(|f| f.after.as_deref())
     }
 
     pub fn with_notices(mut self, notices: Vec<crate::citations::LintFinding>) -> Review {

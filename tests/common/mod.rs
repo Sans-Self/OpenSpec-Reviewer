@@ -70,6 +70,7 @@ pub fn snapshot(files: Vec<(&str, Option<&str>, Option<&str>)>) -> Snapshot {
             })
             .collect(),
         origin: "test".to_string(),
+        pull_request: None,
     }
 }
 
@@ -189,6 +190,71 @@ Rows MUST be ordered alphabetically by path.
 - **WHEN** the index renders routes
 - **THEN** the rows appear in path order
 ";
+
+/// A stand-in for the `gh` CLI. It answers from files under `gh/` in the
+/// directory it is run in, which is the repository the tool was pointed
+/// at, and records the arguments and the request body there, so a test
+/// reads back exactly what the tool asked for.
+const GH_STUB: &str = r#"#!/bin/sh
+dir=gh
+mkdir -p "$dir"
+printf '%s\n' "$*" >> "$dir/args"
+case "$1 $2" in
+  'pr view') cat "$dir/pr-view.json"; exit 0 ;;
+  'pr diff') cat "$dir/pr.diff"; exit 0 ;;
+esac
+attempt=$(cat "$dir/attempts" 2>/dev/null || echo 0)
+attempt=$((attempt + 1))
+echo "$attempt" > "$dir/attempts"
+cat > "$dir/request-$attempt.json"
+if [ -f "$dir/fail" ]; then
+  cat "$dir/fail" >&2
+  exit 1
+fi
+if [ -f "$dir/reject-first" ] && [ "$attempt" -eq 1 ]; then
+  echo 'gh: Validation Failed (HTTP 422)' >&2
+  exit 1
+fi
+cat "$dir/response.json"
+"#;
+
+/// Put the stub in front of `PATH`, once per test process. The rest of
+/// `PATH` stays, so `git` and the like still resolve.
+pub fn gh_stub() {
+    use std::sync::OnceLock;
+    static STUB: OnceLock<()> = OnceLock::new();
+    STUB.get_or_init(|| {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("openspec-reviewer-gh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("gh");
+        std::fs::write(&path, GH_STUB).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let rest = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{rest}", dir.display()));
+    });
+}
+
+impl Repo {
+    /// One of the files the stub `gh` answers from.
+    pub fn gh(&self, name: &str, text: &str) -> &Repo {
+        self.write(&format!("gh/{name}"), text)
+    }
+
+    /// The body of the nth request the stub received, as JSON.
+    pub fn gh_request(&self, nth: usize) -> serde_json::Value {
+        let path = self.root().join(format!("gh/request-{nth}.json"));
+        let text =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        serde_json::from_str(&text).expect("the request is JSON")
+    }
+
+    pub fn gh_requests(&self) -> usize {
+        std::fs::read_to_string(self.root().join("gh/attempts"))
+            .map(|t| t.trim().parse().unwrap_or(0))
+            .unwrap_or(0)
+    }
+}
 
 pub fn exe() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_openspec-reviewer"))

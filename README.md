@@ -95,6 +95,18 @@ errors, `1` on warnings, `0` otherwise.
 Approvals and notes live under `$XDG_STATE_HOME/openspec-reviewer/`, per
 repository and change. `--no-state` ignores them.
 
+Reviewing a pull request through `gh <pr>` ends with the notes offered to
+it: quitting with a note that has not been posted asks first, `y` posts
+and leaves, `n` leaves without. One review with the event `COMMENT` goes
+back, each note a comment on the line of its own heading in the delta
+file, the head commit the review opened on. A note whose heading the pull
+request's diff does not show travels in the review body under a heading
+naming its capability and requirement, and so does every note when GitHub
+refuses the lines. A note remembers the review it went to and is not
+offered twice; editing it makes it a new note. When the post fails the
+view stays where it was with gh's own words in the status line, and the
+notes stay local.
+
 ## Shell completion
 
 The binary is its own completer, so a change name completes from the

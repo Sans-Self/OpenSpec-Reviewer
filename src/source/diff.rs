@@ -111,7 +111,11 @@ pub fn parse_diff(root: &Path, text: &str, origin: String) -> Result<Snapshot, S
     if files.is_empty() {
         return Err(SourceError::NoOpenSpecContent);
     }
-    Ok(Snapshot { files, origin })
+    Ok(Snapshot {
+        files,
+        origin,
+        pull_request: None,
+    })
 }
 
 fn apply_file(root: &Path, path: &str, f: &FilePatch<'_>) -> Result<FileChange, SourceError> {

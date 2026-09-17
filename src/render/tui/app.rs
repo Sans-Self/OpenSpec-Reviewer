@@ -156,12 +156,21 @@ pub struct NotesState {
     pub confirming: bool,
 }
 
+/// What the quit prompt says: how many notes are unposted, and which pull
+/// request they would go to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuitPrompt {
+    pub notes: usize,
+    pub pull_request: u64,
+}
+
 /// An overlay that swallows every key until it closes itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Modal {
     History(HistoryState),
     Note(NoteEdit),
     Notes(NotesState),
+    Quit(QuitPrompt),
 }
 
 /// Where the keys go. One modal at a time: a flat enum, not a stack.
@@ -177,6 +186,8 @@ pub enum Focus {
 pub enum Effect {
     /// `^E`: suspend the view and hand the popup's buffer to `$EDITOR`.
     EscalateNote,
+    /// `y` in the quit prompt: send the unposted notes to the pull request.
+    PostNotes,
 }
 
 pub struct App {
@@ -233,6 +244,7 @@ pub const BINDINGS: &[(&str, &str)] = &[
     ("PgUp / PgDn, Ctrl-u / Ctrl-d", "scroll the detail pane"),
     ("?", "this help"),
     ("q / Esc", "quit (Esc closes an overlay first)"),
+    ("y / n", "in the quit prompt: post the notes / quit without"),
 ];
 
 /// Every row the list can hold, folds ignored.
@@ -990,6 +1002,7 @@ impl App {
             Focus::Modal(Modal::History(_)) => self.handle_history_key(key),
             Focus::Modal(Modal::Note(_)) => self.handle_note_key(key),
             Focus::Modal(Modal::Notes(_)) => self.handle_notes_key(key),
+            Focus::Modal(Modal::Quit(_)) => self.handle_quit_key(key),
             Focus::Browsing => self.handle_browsing_key(key),
         }
     }
@@ -998,7 +1011,7 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (key.code, ctrl) {
             (KeyCode::Char('c'), true) | (KeyCode::Char('q'), false) | (KeyCode::Esc, false) => {
-                self.quit = true
+                self.quit_or_prompt()
             }
             (KeyCode::Char('j'), false) | (KeyCode::Down, false) => {
                 if self.pane == Pane::Detail {
@@ -1038,6 +1051,46 @@ impl App {
             (KeyCode::PageUp, _) | (KeyCode::Char('u'), true) => {
                 self.scroll_by(-i32::from(self.detail_height / 2).max(1))
             }
+            _ => {}
+        }
+        None
+    }
+
+    /// The notes this review would post, if it has anywhere to post them.
+    pub fn unposted_notes(&self) -> Option<crate::review::post::ReviewPost> {
+        self.review.pull_request.as_ref()?;
+        crate::review::post::plan(&self.review, &self.stores)
+    }
+
+    /// A quit key with unposted notes on a pull request asks first; with
+    /// nothing to post it quits, which is every other source's only path.
+    fn quit_or_prompt(&mut self) {
+        match (self.review.pull_request.as_ref(), self.unposted_notes()) {
+            (Some(pr), Some(post)) => {
+                self.focus = Focus::Modal(Modal::Quit(QuitPrompt {
+                    notes: post.len(),
+                    pull_request: pr.number,
+                }))
+            }
+            _ => self.quit = true,
+        }
+    }
+
+    pub fn quit_prompt(&self) -> Option<&QuitPrompt> {
+        match &self.focus {
+            Focus::Modal(Modal::Quit(prompt)) => Some(prompt),
+            _ => None,
+        }
+    }
+
+    /// The prompt asked twice already, so the interrupt key is a decline
+    /// rather than a third question.
+    fn handle_quit_key(&mut self, key: KeyEvent) -> Option<Effect> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match (key.code, ctrl) {
+            (KeyCode::Char('y'), false) => return Some(Effect::PostNotes),
+            (KeyCode::Char('n'), false) | (KeyCode::Char('c'), true) => self.quit = true,
+            (KeyCode::Esc, _) => self.focus = Focus::Browsing,
             _ => {}
         }
         None

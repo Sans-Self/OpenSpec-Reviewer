@@ -2,7 +2,9 @@
 
 use super::colour::ansi;
 use super::{approval, history_summary};
-use crate::review::{inline_view, DiffLine, Pairing, ParaKind, Review, Severity, SpanMark};
+use crate::review::{
+    inline_view, DiffLine, Pairing, ParaKind, Review, Severity, SpanMark, OUTDATED_NOTE,
+};
 use std::fmt::Write;
 
 #[derive(Debug, Clone, Copy)]
@@ -101,7 +103,7 @@ fn write_pairing(out: &mut String, p: &Pairing, colour: bool) {
             };
         }
         if note.outdated {
-            let _ = writeln!(out, "        text changed since the note was written");
+            let _ = writeln!(out, "        {OUTDATED_NOTE}");
         }
     }
     let _ = writeln!(out, "    {}", history_summary(p));
@@ -133,7 +135,7 @@ pub fn render(review: &Review, options: TextOptions) -> String {
                 if let Some(note) = &a.state.note {
                     let _ = writeln!(out, "    ✎ note: {}", note.text);
                     if a.note_outdated() {
-                        let _ = writeln!(out, "        text changed since the note was written");
+                        let _ = writeln!(out, "        {OUTDATED_NOTE}");
                     }
                 }
                 out.push('\n');

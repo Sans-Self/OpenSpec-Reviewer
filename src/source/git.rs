@@ -81,6 +81,7 @@ impl Source for GitSource {
         Ok(Snapshot {
             files,
             origin: format!("git {} against {base}", self.reference),
+            pull_request: None,
         })
     }
 }

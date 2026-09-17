@@ -176,7 +176,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         && cli.output.format.is_none()
         && !cli.output.findings_only;
     if interactive {
-        tui::run(built.review, built.stores)?;
+        tui::run(&root, built.review, built.stores)?;
         return Ok(0);
     }
 

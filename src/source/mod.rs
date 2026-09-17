@@ -16,7 +16,7 @@ pub use archive::{load_archives, load_open_changes, Archive};
 pub use canon::{load_canon, CanonError};
 pub use change::ChangeSource;
 pub use diff::{parse_diff, DiffSource};
-pub use gh::GhSource;
+pub use gh::{post_review, GhSource};
 pub use git::GitSource;
 pub use lint::{survey, Workspace, WorkspaceError};
 pub use repo::{repo_key, RepoIdentity};
@@ -33,11 +33,42 @@ pub struct FileChange {
     pub after: Option<String>,
 }
 
+/// The pull request a snapshot came from. Only the `gh` source fills it,
+/// and only a snapshot that has one has somewhere to post notes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequest {
+    pub number: u64,
+    /// The web URL, which is also where the owner and repository come from.
+    pub url: String,
+    /// The head commit at open. Comments are pinned to it, so a push while
+    /// the review is on screen shows them as outdated rather than moving
+    /// them onto lines nobody reviewed.
+    pub head: String,
+}
+
+impl PullRequest {
+    /// `owner` and `repo` out of `https://github.com/<owner>/<repo>/pull/n`,
+    /// so a pull request given as a URL posts to the repository it names
+    /// rather than the one the working directory happens to be.
+    pub fn owner_repo(&self) -> Option<(&str, &str)> {
+        let rest = self
+            .url
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(&self.url);
+        let mut parts = rest.split('/').skip(1).filter(|p| !p.is_empty());
+        let owner = parts.next()?;
+        let repo = parts.next()?;
+        Some((owner, repo))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Snapshot {
     pub files: Vec<FileChange>,
     /// Shown in the status line: `change foo`, `git feature/x against main`.
     pub origin: String,
+    pub pull_request: Option<PullRequest>,
 }
 
 impl Snapshot {
@@ -75,6 +106,10 @@ pub enum SourceError {
     GhMissing,
     #[error("gh failed:\n{stderr}")]
     Gh { stderr: String },
+    #[error("cannot tell the owner and repository from {url}")]
+    GhPullRequestUrl { url: String },
+    #[error("gh answered with something that is not a {what}:\n{body}")]
+    GhAnswer { what: String, body: String },
     #[error("{context}: {source}")]
     Io {
         context: String,

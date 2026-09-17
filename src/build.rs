@@ -114,7 +114,8 @@ pub fn build_review(root: &Path, snapshot: &Snapshot) -> Result<Review, BuildErr
     let canon_edits = snapshot.canon_files().map(CanonEdit::from_file).collect();
     Ok(Review::new(snapshot.origin.clone(), reviews, canon_edits)
         .with_glossary(glossary)
-        .with_notices(notices))
+        .with_notices(notices)
+        .with_snapshot(snapshot))
 }
 
 /// The lint's view of the change under review: its deltas as the snapshot
