@@ -158,8 +158,8 @@ non-zero, the tool MUST stop and show gh's stderr.
 ### Requirement: Canon files in a snapshot are shown as plain diffs
 
 When a snapshot holds a file under `openspec/specs/`, the tool MUST list
-it under a canon heading as a plain line diff. It MUST NOT pair those
-lines with a change.
+it under a canon heading as a plain line diff. It MUST NOT match those
+lines to a change.
 
 #### Scenario: Direct canon edit
 

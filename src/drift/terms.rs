@@ -102,14 +102,29 @@ fn side_text(req: Option<&Requirement>) -> String {
     req.map(requirement_text).unwrap_or_default()
 }
 
+/// The text the phrase tier reads: a requirement without its binding line
+/// and its `- **Admitted:**` and `- **Deprecated:**` lines. Those lines
+/// list words rather than say anything with them, so a word retired from
+/// one is not a phrase lost from a sentence. Only glossary bodies carry
+/// them, so stripping everywhere costs nothing.
+pub fn prose(req: &Requirement) -> String {
+    let mut stripped = req.clone();
+    stripped.body = crate::glossary::parse_markers(&req.body).meaning;
+    requirement_text(&stripped)
+}
+
+fn phrase_side_text(req: Option<&Requirement>) -> String {
+    req.map(prose).unwrap_or_default()
+}
+
 /// Terms on the before side and not on the after side, compared
 /// case-insensitively.
 pub fn removed_terms(
-    before: Option<&Requirement>,
-    after: Option<&Requirement>,
+    before_req: Option<&Requirement>,
+    after_req: Option<&Requirement>,
 ) -> Vec<RemovedTerm> {
-    let before = side_text(before);
-    let after = side_text(after);
+    let before = side_text(before_req);
+    let after = side_text(after_req);
     let after_lower = after.to_lowercase();
     let backtick = Regex::new("`([^`\n]+)`").expect("compiles");
     let quoted = Regex::new("\"([^\"\n]+)\"").expect("compiles");
@@ -126,12 +141,15 @@ pub fn removed_terms(
     }
 
     out.extend(
-        removed_phrases(&words(&before), &words(&after))
-            .into_iter()
-            .map(|text| RemovedTerm {
-                tier: Tier::Phrase,
-                text,
-            }),
+        removed_phrases(
+            &words(&phrase_side_text(before_req)),
+            &words(&phrase_side_text(after_req)),
+        )
+        .into_iter()
+        .map(|text| RemovedTerm {
+            tier: Tier::Phrase,
+            text,
+        }),
     );
     out
 }

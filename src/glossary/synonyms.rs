@@ -3,6 +3,7 @@
 
 use crate::citations::Grammar;
 use regex::Regex;
+use std::ops::Range;
 
 /// The ISO 704 acceptability ratings a term may spell out. The preferred
 /// term is the requirement name, so it needs no line of its own.
@@ -140,6 +141,16 @@ impl Matcher {
     /// order of offsets is meaningful.
     pub fn first(&self, text: &str) -> Option<usize> {
         self.re.find(&Matcher::cleaned(text)).map(|m| m.start())
+    }
+
+    /// The byte range of every hit in the citation-stripped text. Two
+    /// matchers run over the same text yield comparable ranges, which is
+    /// what lets a longer phrase shield a shorter one inside it.
+    pub fn ranges(&self, text: &str) -> Vec<Range<usize>> {
+        self.re
+            .find_iter(&Matcher::cleaned(text))
+            .map(|m| m.start()..m.end())
+            .collect()
     }
 
     pub fn count(&self, text: &str) -> usize {

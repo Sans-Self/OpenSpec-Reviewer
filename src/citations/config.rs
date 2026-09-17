@@ -102,6 +102,12 @@ min_recurrence = 3
 # [[lint.ignore_uncited]]
 # requirement = "citations § Coverage lists citing tests per requirement"
 # reason      = "asserted by the ledger snapshot, which cannot cite itself"
+
+# Evidence a spec quotes as an example rather than cites. Each entry names
+# exactly one of `citation`, `path`, `test` or `commit`, and says why.
+# [[lint.ignore_evidence]]
+# citation = "alpha § Some rule"
+# reason   = "a made-up capability in a scenario"
 "#,
         roots = toml_list(survey.roots.iter().cloned()),
         globs = toml_list(
@@ -140,6 +146,19 @@ impl Config {
             .collect()
     }
 
+    /// The citations `[[lint.ignore_evidence]]` names, so a review and the
+    /// lint reach the same verdict on the same quoted example.
+    pub fn ignored_citations(&self) -> BTreeSet<String> {
+        self.lint
+            .ignore_evidence
+            .iter()
+            .filter_map(|e| match e.names() {
+                Some((Evidence::Citation, value)) => Some(value.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Every ignore entry says why it is there, and confines itself with an
     /// array. Checked once, at the edge, so the rest of the tool can read
     /// the lists as given.
@@ -165,6 +184,21 @@ impl Config {
                     path: path.to_path_buf(),
                     list: "[[lint.ignore_uncited]]",
                     entry: entry.requirement.clone(),
+                });
+            }
+        }
+        for entry in &self.lint.ignore_evidence {
+            let Some((_, named)) = entry.names() else {
+                return Err(ConfigError::EvidenceKind {
+                    path: path.to_path_buf(),
+                    entry: entry.label(),
+                });
+            };
+            if entry.reason.is_none() {
+                return Err(ConfigError::IgnoreWithoutReason {
+                    path: path.to_path_buf(),
+                    list: "[[lint.ignore_evidence]]",
+                    entry: named.to_string(),
                 });
             }
         }
@@ -226,6 +260,73 @@ pub struct IgnoreUncited {
     pub reason: Option<String>,
 }
 
+/// Which family of evidence an ignore entry names. The kind is part of
+/// the match, so an entry written for a path never silences a citation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Evidence {
+    Citation,
+    Path,
+    Test,
+    Commit,
+}
+
+impl Evidence {
+    /// The key that names this kind, for a message about the entry.
+    pub fn key(self) -> &'static str {
+        match self {
+            Evidence::Citation => "citation",
+            Evidence::Path => "path",
+            Evidence::Test => "test",
+            Evidence::Commit => "commit",
+        }
+    }
+}
+
+/// One piece of missing evidence the lint must not report. Exactly one of
+/// the four keys names it; `parse_config` is the only way in and refuses
+/// an entry that names none, several, or no reason, so a consumer always
+/// gets a kind and a string from `names`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IgnoreEvidence {
+    pub citation: Option<String>,
+    pub path: Option<String>,
+    pub test: Option<String>,
+    pub commit: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl IgnoreEvidence {
+    /// The kind and the string this entry names, when it names exactly one.
+    pub fn names(&self) -> Option<(Evidence, &str)> {
+        let mut named = self.kinds();
+        match (named.next(), named.next()) {
+            (Some(one), None) => Some(one),
+            _ => None,
+        }
+    }
+
+    fn kinds(&self) -> impl Iterator<Item = (Evidence, &str)> {
+        [
+            (Evidence::Citation, &self.citation),
+            (Evidence::Path, &self.path),
+            (Evidence::Test, &self.test),
+            (Evidence::Commit, &self.commit),
+        ]
+        .into_iter()
+        .filter_map(|(kind, value)| value.as_deref().map(|v| (kind, v)))
+    }
+
+    /// The entry as a message names it: its one value, or every value it
+    /// wrongly carries, or the empty string when it carries none.
+    pub fn label(&self) -> String {
+        self.kinds()
+            .map(|(kind, value)| format!("{} = \"{value}\"", kind.key()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 impl Definitions {
     /// The dismissed terms as the checks read them.
     pub fn ignores(&self) -> Ignores {
@@ -277,6 +378,9 @@ pub struct Lint {
     /// `[[lint.ignore_uncited]]`: requirements the ledger must not mark.
     #[serde(default)]
     pub ignore_uncited: Vec<IgnoreUncited>,
+    /// `[[lint.ignore_evidence]]`: evidence the lint must not chase.
+    #[serde(default)]
+    pub ignore_evidence: Vec<IgnoreEvidence>,
 }
 
 impl Lint {
@@ -338,6 +442,8 @@ pub enum ConfigError {
     },
     #[error("{path}: [[definitions.ignore]] entry `{entry}`: `in` is an array of scopes, as in `in = [\"citations\"]`")]
     ScopeNotAnArray { path: PathBuf, entry: String },
+    #[error("{path}: [[lint.ignore_evidence]] entry `{entry}` names {} of `citation`, `path`, `test`, `commit`; an entry names exactly one", if entry.is_empty() { "none" } else { "more than one" })]
+    EvidenceKind { path: PathBuf, entry: String },
 }
 
 /// Write the rendered survey to `openspec/reviewer.toml`. `create_new`

@@ -26,3 +26,43 @@ max_common = 5
 [definitions]
 capability     = "definitions"
 min_recurrence = 3
+
+# Evidence the specs quote as an example rather than cite. Each entry
+# names one of `citation`, `path`, `test` or `commit`, and the lint warns
+# when one stops silencing anything.
+
+[[lint.ignore_evidence]]
+citation = "sitemap-index § Flat index of all routes and pages"
+reason   = "a made-up capability in the scenario that shows a citation in a test title"
+
+[[lint.ignore_evidence]]
+citation = "lineage § Lineage is"
+reason   = "the truncated half of a citation the wrap scenarios reassemble"
+
+[[lint.ignore_evidence]]
+citation = "alpha § Some rule"
+reason   = "a made-up capability the grammar scenarios parse"
+
+[[lint.ignore_evidence]]
+citation = "alpha § Some rule that"
+reason   = "the same made-up capability, cut off where a line wraps"
+
+[[lint.ignore_evidence]]
+citation = "keyring-tombstones § Admin API mints invites"
+reason   = "an Opake requirement quoted to show a synonym inside a citation"
+
+[[lint.ignore_evidence]]
+citation = "x § A tenant imports the document"
+reason   = "a made-up capability in the scenario for a sibling mention that is only a citation"
+
+[[lint.ignore_evidence]]
+path   = "src/a.rs"
+reason = "the stand-in path in the scenario for a cited path that does not exist"
+
+[[lint.ignore_evidence]]
+test   = "bug__float_not_rounding"
+reason = "the stand-in regression test in the scenario for a cited test that is gone"
+
+[[lint.ignore_evidence]]
+commit = "deadbeef"
+reason = "the stand-in hash in the scenario for a cited commit that is not in the repository"

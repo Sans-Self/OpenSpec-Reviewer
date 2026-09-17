@@ -1,6 +1,6 @@
 //! The lint as one pure function over what the workspace collected.
 
-use super::config::Config;
+use super::config::{Config, Evidence, IgnoreEvidence};
 use super::evidence::{check_hashes, check_paths, check_tests, Probe};
 use super::radius::blast_radius;
 use super::scan::{reason_for, scan, OpenChange, SourceFile, SpecFile};
@@ -137,6 +137,59 @@ pub struct Input<'a> {
     pub probe: &'a dyn Probe,
 }
 
+/// The `[[lint.ignore_evidence]]` entries, and which of them silenced
+/// something. An entry is matched only against its own family and only as
+/// an equal string, so a path entry never swallows a citation.
+struct EvidenceIgnores<'a> {
+    entries: Vec<(Evidence, &'a str)>,
+    used: Vec<bool>,
+}
+
+impl<'a> EvidenceIgnores<'a> {
+    fn new(config: &'a Config) -> EvidenceIgnores<'a> {
+        let entries: Vec<_> = config
+            .lint
+            .ignore_evidence
+            .iter()
+            .filter_map(IgnoreEvidence::names)
+            .collect();
+        let used = vec![false; entries.len()];
+        EvidenceIgnores { entries, used }
+    }
+
+    /// Whether this finding is dismissed, marking the entry that dismissed it.
+    fn dismisses(&mut self, kind: Evidence, value: &str) -> bool {
+        let mut hit = false;
+        for (i, (k, v)) in self.entries.iter().enumerate() {
+            if *k == kind && *v == value {
+                self.used[i] = true;
+                hit = true;
+            }
+        }
+        hit
+    }
+
+    /// Entries that silenced nothing, as warnings for the summary.
+    fn stale(&self) -> Vec<LintFinding> {
+        self.entries
+            .iter()
+            .zip(&self.used)
+            .filter(|(_, used)| !**used)
+            .map(|((kind, value), _)| {
+                LintFinding::new(
+                    Severity::Warning,
+                    super::config::CONFIG_PATH,
+                    format!(
+                        "ignored evidence `{value}` silences nothing; remove the {} entry from `[[lint.ignore_evidence]]` in {}",
+                        kind.key(),
+                        super::config::CONFIG_PATH
+                    ),
+                )
+            })
+            .collect()
+    }
+}
+
 pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError> {
     let lint = &config.lint;
     let grammar = Grammar::new(lint.cite_helper.as_deref());
@@ -148,6 +201,7 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         &grammar,
     );
     let mut findings: Vec<LintFinding> = Vec::new();
+    let mut ignores = EvidenceIgnores::new(config);
     let mut counts = Counts {
         specs: input.specs.len(),
         changes: input.change_dirs.len(),
@@ -171,7 +225,12 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
     if let (Some(prefixes), Some(extensions)) = (&lint.path_prefixes, &lint.path_extensions) {
         let checked = check_paths(input.specs, prefixes, extensions, input.probe);
         counts.paths = checked.count;
-        findings.extend(checked.missing.into_iter().map(|(spec, path)| {
+        let missing = checked
+            .missing
+            .into_iter()
+            .filter(|(_, path)| !ignores.dismisses(Evidence::Path, path))
+            .collect::<Vec<_>>();
+        findings.extend(missing.into_iter().map(|(spec, path)| {
             LintFinding::new(
                 Severity::Error,
                 display(&spec),
@@ -183,7 +242,12 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         let re = Regex::new(pattern).map_err(LintError::TestPattern)?;
         let checked = check_tests(input.specs, &re, input.sources);
         counts.tests = checked.count;
-        findings.extend(checked.missing.into_iter().map(|(spec, name)| {
+        let missing = checked
+            .missing
+            .into_iter()
+            .filter(|(_, name)| !ignores.dismisses(Evidence::Test, name))
+            .collect::<Vec<_>>();
+        findings.extend(missing.into_iter().map(|(spec, name)| {
             LintFinding::new(
                 Severity::Error,
                 display(&spec),
@@ -194,7 +258,12 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
     {
         let checked = check_hashes(input.specs, input.probe);
         counts.hashes = checked.count;
-        findings.extend(checked.missing.into_iter().map(|(spec, hash)| {
+        let missing = checked
+            .missing
+            .into_iter()
+            .filter(|(_, hash)| !ignores.dismisses(Evidence::Commit, hash))
+            .collect::<Vec<_>>();
+        findings.extend(missing.into_iter().map(|(spec, hash)| {
             LintFinding::new(
                 Severity::Error,
                 display(&spec),
@@ -203,7 +272,11 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         }));
     }
 
-    findings.extend(scanned.dangling().map(|(s, r)| {
+    let dangling: Vec<_> = scanned
+        .dangling()
+        .filter(|(s, _)| !ignores.dismisses(Evidence::Citation, &s.citation.to_string()))
+        .collect();
+    findings.extend(dangling.into_iter().map(|(s, r)| {
         LintFinding::new(
             Severity::Error,
             display(&s.file),
@@ -225,6 +298,7 @@ pub fn lint(input: &Input<'_>, config: &Config) -> Result<LintReport, LintError>
         .flat_map(|c| c.deltas.iter().cloned())
         .collect();
     let register = Register::build(input.canon, &open_deltas);
+    findings.extend(ignores.stale());
     for d in ignore_warnings(config, &register, input.canon, &open_deltas) {
         findings.push(LintFinding::new(
             Severity::Warning,

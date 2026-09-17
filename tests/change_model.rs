@@ -137,7 +137,7 @@ fn a_delta_groups_requirements_by_kind__unknown_section() {
 }
 
 #[test]
-fn a_rename_is_a_pair_of_names() {
+fn a_rename_reads_a_from_line_and_a_to_line() {
     let text = "\
 ## RENAMED Requirements
 
@@ -154,7 +154,7 @@ fn a_rename_is_a_pair_of_names() {
 }
 
 #[test]
-fn a_rename_is_a_pair_of_names__orphan_from() {
+fn a_rename_reads_a_from_line_and_a_to_line__orphan_from() {
     let text = "## RENAMED Requirements\n\n- FROM: `### Requirement: A`\n\n## ADDED Requirements\n";
     let err = parse_delta_spec("alpha", "f.md", text).unwrap_err();
     assert_eq!(
