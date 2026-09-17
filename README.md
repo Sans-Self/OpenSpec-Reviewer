@@ -37,15 +37,15 @@ The repository is a nix flake with a package output, so nothing needs
 cloning:
 
 ```sh
-nix run github:Sans-Self/OpenSpec-Reviewer/v0.1.0 -- lint
-nix profile install github:Sans-Self/OpenSpec-Reviewer/v0.1.0
+nix run github:Sans-Self/OpenSpec-Reviewer/v1.0.0 -- lint
+nix profile install github:Sans-Self/OpenSpec-Reviewer/v1.0.0
 ```
 
 Or pin it in your own flake and put it in the dev shell:
 
 ```nix
 inputs.openspec-reviewer = {
-  url = "github:Sans-Self/OpenSpec-Reviewer/v0.1.0";
+  url = "github:Sans-Self/OpenSpec-Reviewer/v1.0.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 

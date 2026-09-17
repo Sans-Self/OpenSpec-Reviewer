@@ -3,7 +3,7 @@ name: opsx-reviewer-cite
 description: Add spec: citations to the tests that exercise requirements openspec-reviewer's coverage ledger lists as uncited. Edits test titles on confirmation.
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
-  generatedBy: openspec-reviewer 0.2.0
+  generatedBy: openspec-reviewer 1.0.0
   checksum: d71603434596409a
 ---
 Add `spec:` citations to the tests that already exercise uncited

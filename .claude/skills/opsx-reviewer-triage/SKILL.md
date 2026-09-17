@@ -3,7 +3,7 @@ name: opsx-reviewer-triage
 description: Walk an OpenSpec change's reviewer findings in severity order, propose the usual fix for mechanical ones, apply to the change's deltas on confirmation, route judgment findings to crossref.
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
-  generatedBy: openspec-reviewer 0.2.0
+  generatedBy: openspec-reviewer 1.0.0
   checksum: 74def0b064145225
 ---
 Walk a change's findings and fix the mechanical ones. This skill edits

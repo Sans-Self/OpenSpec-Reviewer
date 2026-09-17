@@ -3,7 +3,7 @@ name: opsx-reviewer-discover
 description: Find the vocabulary a repository's specs rely on in plain prose, across capabilities, and hand the candidates to define. Writes nothing itself; define writes under openspec/changes/ on confirmation.
 allowed-tools: Bash(openspec-reviewer:*), Bash(openspec:*)
 metadata:
-  generatedBy: openspec-reviewer 0.2.0
+  generatedBy: openspec-reviewer 1.0.0
   checksum: befa890c28e59892
 ---
 Find the vocabulary a repository relies on without marking it up. The
