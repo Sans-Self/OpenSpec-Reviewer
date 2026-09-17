@@ -49,7 +49,10 @@ requirement, and suspending the view hides the text being written about.
   a timestamp. Old state files parse: a bare string note is a note with
   no hash.
 - `src/render/tui/`: a row kind, a fold, a modal focus state.
-- No change to `model`, `review` or `citations`. The data is there.
+- `src/review/`: a `Pairing` carries its notes, resolved from the store
+  and anchored, because JSON has to report each note's anchor and
+  whether it is outdated, and nothing else reaches a scenario note.
+- No change to `model` or `citations`. The data is there.
 
 ## Non-goals
 
