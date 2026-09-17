@@ -264,6 +264,21 @@ impl Store {
         })
     }
 
+    /// Drop every note, keeping approvals, and forget the items that held
+    /// nothing else. One save for the lot, so a clear of forty notes is
+    /// one write. Returns how many notes went.
+    pub fn clear_notes(&mut self) -> Result<usize, StateError> {
+        let cleared = self
+            .state
+            .items
+            .values_mut()
+            .filter_map(|item| item.note.take())
+            .count();
+        self.state.items.retain(|_, item| !item.is_empty());
+        self.save()?;
+        Ok(cleared)
+    }
+
     /// Store a note against `anchor_hash`, the hash of the text it is
     /// written about; an empty note removes it.
     pub fn set_note(

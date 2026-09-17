@@ -4,7 +4,7 @@
 use crate::render::approval;
 use crate::review::pair::{diff_versions, version_lines};
 use crate::review::{inline_view, scenario_view, DiffLine, Pairing, Review, ScenarioMatch};
-use crate::state::{ApprovalStatus, Store};
+use crate::state::{ApprovalStatus, ItemState, Store};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -133,11 +133,34 @@ pub enum Transient {
     Help,
 }
 
+/// One row of the notes panel: the note, how its anchor reads, and where
+/// in the main list `Enter` has to land.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteRow {
+    pub row: Row,
+    /// The anchor as plain output names it: `<capability> § <requirement>`,
+    /// a chevron and the scenario for a scenario note, or the artefact's
+    /// name.
+    pub label: String,
+    pub first_line: String,
+    pub outdated: bool,
+}
+
+/// The notes panel. `confirming` is `X` waiting for its answer: it lives
+/// here rather than in a transient, because the answer returns to the
+/// panel and a transient returns to browsing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NotesState {
+    pub selected: usize,
+    pub confirming: bool,
+}
+
 /// An overlay that swallows every key until it closes itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Modal {
     History(HistoryState),
     Note(NoteEdit),
+    Notes(NotesState),
 }
 
 /// Where the keys go. One modal at a time: a flat enum, not a stack.
@@ -185,6 +208,11 @@ pub const BINDINGS: &[(&str, &str)] = &[
     ("e", "write a note on this row"),
     ("⏎ / Esc", "in the note popup: save / cancel"),
     ("^E", "in the note popup: hand the text to $EDITOR"),
+    ("N", "every note of the change, in a panel"),
+    (
+        "⏎ / d / X",
+        "in the notes panel: go to the row / delete / clear every note",
+    ),
     ("H", "history of this requirement"),
     ("m", "cycle display mode (inline, side-by-side, raw)"),
     ("D", "definitions of the terms this requirement uses"),
@@ -454,6 +482,20 @@ impl App {
         }
     }
 
+    /// Put the cursor on `target`, unfolding the requirement when the
+    /// target is one of its scenarios: the cursor has to be able to reach
+    /// where it is going.
+    fn jump_to(&mut self, target: &Row) {
+        if let (Row::Scenario { .. }, Some(anchor)) = (target, target.anchor()) {
+            self.unfolded.insert(anchor);
+        }
+        self.rows = visible_rows(&self.review, &self.unfolded);
+        if let Some(i) = self.index_of(target) {
+            self.cursor = i;
+            self.scroll = 0;
+        }
+    }
+
     /// `n` and `p`. The search runs over every row, folded or not: the
     /// cursor has to be able to reach where it is going, so a jump into a
     /// folded requirement unfolds it.
@@ -476,14 +518,7 @@ impl App {
         else {
             return;
         };
-        if let (Row::Scenario { .. }, Some(anchor)) = (&target, target.anchor()) {
-            self.unfolded.insert(anchor);
-        }
-        self.rows = visible_rows(&self.review, &self.unfolded);
-        if let Some(i) = self.index_of(&target) {
-            self.cursor = i;
-            self.scroll = 0;
-        }
+        self.jump_to(&target);
     }
 
     fn scroll_by(&mut self, delta: i32) {
@@ -514,6 +549,32 @@ impl App {
         if let Some(p) = self.pairing_mut(anchor) {
             p.state = items.get(&p.key()).cloned().unwrap_or_default();
             p.refresh_notes(&items);
+        }
+    }
+
+    /// Read every row's approval and notes back out of the stores, for the
+    /// changes that touch all of them at once.
+    fn sync_all(&mut self) {
+        let items: BTreeMap<String, BTreeMap<String, ItemState>> = self
+            .stores
+            .iter()
+            .map(|(name, store)| (name.clone(), store.state.items.clone()))
+            .collect();
+        for change in &mut self.review.changes {
+            let Some(items) = items.get(&change.name) else {
+                continue;
+            };
+            for a in &mut change.artefacts {
+                let key = a.key();
+                a.state = items.get(&key).cloned().unwrap_or_default();
+            }
+            for cap in &mut change.capabilities {
+                for p in &mut cap.pairings {
+                    let key = p.key();
+                    p.state = items.get(&key).cloned().unwrap_or_default();
+                    p.refresh_notes(items);
+                }
+            }
         }
     }
 
@@ -727,6 +788,159 @@ impl App {
         }
     }
 
+    /// `N`: every note of the review, artefacts first and then the main
+    /// list's order. Derived on the spot rather than cached, so deleting a
+    /// note cannot leave a stale row behind.
+    pub fn note_rows(&self) -> Vec<NoteRow> {
+        let multi = self.review.changes.len() > 1;
+        all_rows(&self.review)
+            .into_iter()
+            .filter_map(|row| self.note_row(row, multi))
+            .collect()
+    }
+
+    fn note_row(&self, row: Row, multi: bool) -> Option<NoteRow> {
+        let (anchor, text, outdated) = match &row {
+            Row::Artefact { .. } => {
+                let a = self.artefact_at(&row)?;
+                let note = a.state.note.as_ref()?;
+                (
+                    a.artefact.name.clone(),
+                    note.text.clone(),
+                    a.note_outdated(),
+                )
+            }
+            Row::Requirement { .. } => {
+                let p = self.pairing_at(&row)?;
+                let note = p.note()?;
+                (
+                    format!("{} § {}", p.capability, p.name),
+                    note.text.clone(),
+                    note.outdated,
+                )
+            }
+            Row::Scenario { .. } => {
+                let (p, m) = self.scenario_at(&row)?;
+                let note = p.scenario_note(m.name())?;
+                (
+                    format!("{} § {} › {}", p.capability, p.name, m.name()),
+                    note.text.clone(),
+                    note.outdated,
+                )
+            }
+            _ => return None,
+        };
+        let label = match (multi, self.change_name_of(&row)) {
+            (true, Some(change)) => format!("{change} · {anchor}"),
+            _ => anchor,
+        };
+        Some(NoteRow {
+            row,
+            label,
+            first_line: text.lines().next().unwrap_or_default().to_string(),
+            outdated,
+        })
+    }
+
+    fn change_name_of(&self, row: &Row) -> Option<String> {
+        let index = match *row {
+            Row::Change { change }
+            | Row::Artefact { change, .. }
+            | Row::Capability { change, .. }
+            | Row::Requirement { change, .. }
+            | Row::Scenario { change, .. } => change,
+        };
+        self.review.changes.get(index).map(|c| c.name.clone())
+    }
+
+    pub fn notes_state(&self) -> Option<&NotesState> {
+        match &self.focus {
+            Focus::Modal(Modal::Notes(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    fn notes_state_mut(&mut self) -> Option<&mut NotesState> {
+        match &mut self.focus {
+            Focus::Modal(Modal::Notes(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// `d`: remove the selected note, as saving it empty would. The panel
+    /// stays open on the note that followed, or on the last one.
+    fn delete_selected_note(&mut self, rows: &[NoteRow], selected: usize) {
+        let Some(target) = rows.get(selected).map(|r| r.row.clone()) else {
+            return;
+        };
+        self.set_note_for(&target, None);
+        let remaining = self.note_rows().len();
+        if let Some(state) = self.notes_state_mut() {
+            state.selected = selected.min(remaining.saturating_sub(1));
+        }
+    }
+
+    /// `y` to the clear confirmation. Every store the review reads is
+    /// cleared, since the panel lists every one of their notes; a store
+    /// that refuses to write says so in the status line and the rest are
+    /// still cleared.
+    fn clear_notes(&mut self) {
+        let names: Vec<String> = self.stores.keys().cloned().collect();
+        for name in names {
+            if let Err(e) = self.store_for(&name).clear_notes() {
+                self.message = Some(e.to_string());
+            }
+        }
+        self.sync_all();
+    }
+
+    fn handle_notes_key(&mut self, key: KeyEvent) -> Option<Effect> {
+        let rows = self.note_rows();
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let state = self.notes_state()?;
+        if state.confirming {
+            if matches!(key.code, KeyCode::Char('y')) {
+                self.clear_notes();
+            }
+            if let Some(state) = self.notes_state_mut() {
+                state.confirming = false;
+                state.selected = 0;
+            }
+            return None;
+        }
+        let selected = state.selected;
+        let last = rows.len().saturating_sub(1);
+        match (key.code, ctrl) {
+            (KeyCode::Esc, _) | (KeyCode::Char('N'), false) => self.focus = Focus::Browsing,
+            (KeyCode::Char('q'), false) | (KeyCode::Char('c'), true) => self.quit = true,
+            (KeyCode::Char('j'), false) | (KeyCode::Down, false) => {
+                if let Some(state) = self.notes_state_mut() {
+                    state.selected = (selected + 1).min(last);
+                }
+            }
+            (KeyCode::Char('k'), false) | (KeyCode::Up, false) => {
+                if let Some(state) = self.notes_state_mut() {
+                    state.selected = selected.saturating_sub(1);
+                }
+            }
+            (KeyCode::Enter, _) => {
+                if let Some(target) = rows.get(selected).map(|r| r.row.clone()) {
+                    self.focus = Focus::Browsing;
+                    self.pane = Pane::List;
+                    self.jump_to(&target);
+                }
+            }
+            (KeyCode::Char('d'), false) => self.delete_selected_note(&rows, selected),
+            (KeyCode::Char('X'), false) if !rows.is_empty() => {
+                if let Some(state) = self.notes_state_mut() {
+                    state.confirming = true;
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Effect> {
         self.message = None;
         match &self.focus {
@@ -736,6 +950,7 @@ impl App {
             }
             Focus::Modal(Modal::History(_)) => self.handle_history_key(key),
             Focus::Modal(Modal::Note(_)) => self.handle_note_key(key),
+            Focus::Modal(Modal::Notes(_)) => self.handle_notes_key(key),
             Focus::Browsing => self.handle_browsing_key(key),
         }
     }
@@ -772,6 +987,9 @@ impl App {
             (KeyCode::Char('a'), false) => self.toggle_approval(),
             (KeyCode::Char('e'), false) => self.open_note(),
             (KeyCode::Char('H'), false) => self.open_history(),
+            (KeyCode::Char('N'), false) => {
+                self.focus = Focus::Modal(Modal::Notes(NotesState::default()))
+            }
             (KeyCode::Char('m'), false) => self.mode = self.mode.next(),
             (KeyCode::Char('D'), false) => self.toggle_definitions(),
             (KeyCode::Char('?'), false) => self.focus = Focus::Transient(Transient::Help),
