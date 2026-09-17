@@ -21,8 +21,6 @@ is dark or light, so `Yellow` warnings disappear on white.
   approval marks, delta glyphs, the note marker.
 - The focused pane's border takes the accent colour; the other pane's
   border is dim.
-- Glossary terms in the detail text are underlined; a deprecated synonym
-  is painted in the warning colour where it stands.
 - The status bar colours a count only when it is not zero.
 - `lint` output is coloured when stdout is a terminal: severity word,
   dim path, bold `capability § requirement`, coloured non-zero counts.
@@ -41,9 +39,9 @@ is dark or light, so `Yellow` warnings disappear on white.
 
 ### New Capabilities
 
-- `tui-color`: colour-mode rendering of the diff, list, borders, terms,
-  status bar and lint output; background detection; the palette roles
-  and their variants.
+- `tui-color`: colour-mode rendering of the diff, list, borders, status
+  bar and lint output; background detection; the palette roles and their
+  variants.
 - `user-config`: the user configuration file, its location and
   precedence, and the `palette` key.
 
@@ -73,3 +71,5 @@ is dark or light, so `Yellow` warnings disappear on white.
   fights it.
 - Line numbers in the diff. Paragraphs have none worth showing.
 - User-defined palettes. Three named ones; a fourth is a change.
+- Marking glossary terms where they appear. `term-highlighting` owns it,
+  and it needs no palette.
