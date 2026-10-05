@@ -1,10 +1,11 @@
 [package]
 name = "openspec-reviewer"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 license = "MIT"
 authors = ["Noï van Mondfrans"]
 description = "Review OpenSpec changes as the semantic diff they are, not the file diff git shows"
+repository = "https://github.com/Sans-Self/OpenSpec-Reviewer"
 
 [lib]
 path = "src/lib.rs"
@@ -37,4 +38,9 @@ tempfile = "3"
 
 [profile.release]
 strip = true
+lto = "thin"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
 lto = "thin"

@@ -33,30 +33,50 @@ items one by one, leave notes, and export them for the pull request.
 
 ## Installation
 
-The repository is a nix flake with a package output, so nothing needs
-cloning:
+### Prebuilt binary
+
+The release installer selects the binary for Apple Silicon macOS, Intel
+macOS, ARM64 Linux, or x64 Linux and adds it to your Cargo bin directory:
 
 ```sh
-nix run github:Sans-Self/OpenSpec-Reviewer/v1.0.0 -- lint
-nix profile install github:Sans-Self/OpenSpec-Reviewer/v1.0.0
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/Sans-Self/OpenSpec-Reviewer/releases/download/v1.0.1/openspec-reviewer-installer.sh | sh
 ```
 
-Or pin it in your own flake and put it in the dev shell:
+Each [GitHub release](https://github.com/Sans-Self/OpenSpec-Reviewer/releases)
+also has direct archives, individual SHA-256 files, one `sha256.sum`, and
+GitHub artifact attestations. Verify a downloaded archive's provenance with:
+
+```sh
+gh attestation verify <archive> --repo Sans-Self/OpenSpec-Reviewer
+```
+
+The `git` command is required for repository and ref sources. The `gh` command
+is required only for reviewing a pull request or posting notes to one.
+
+### Nix
+
+The repository is also a Nix flake:
+
+```sh
+nix run github:Sans-Self/OpenSpec-Reviewer/v1.0.1 -- lint
+nix profile install github:Sans-Self/OpenSpec-Reviewer/v1.0.1
+```
+
+A project can pin the flake and retain its release-locked build inputs:
 
 ```nix
-inputs.openspec-reviewer = {
-  url = "github:Sans-Self/OpenSpec-Reviewer/v1.0.0";
-  inputs.nixpkgs.follows = "nixpkgs";
-};
+inputs.openspec-reviewer.url =
+  "github:Sans-Self/OpenSpec-Reviewer/v1.0.1";
 
 devShells.default = pkgs.mkShell {
   packages = [ openspec-reviewer.packages.${system}.default ];
 };
 ```
 
-CI builds every tag for `x86_64-linux` and `aarch64-darwin` and pushes
-the results to the `sans-self` Cachix cache. Trust it once to skip the
-compile:
+CI builds every tag for `x86_64-linux` and `aarch64-darwin` and pushes those
+Nix outputs to the `sans-self` Cachix cache. Trust that cache once if you want
+Nix to substitute its signed binaries instead of compiling them:
 
 ```sh
 cachix use sans-self
