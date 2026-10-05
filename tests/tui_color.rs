@@ -274,6 +274,33 @@ fn the_palette_adapts_to_the_terminal_background__colorfgbg_says_light() {
 }
 
 #[test]
+fn the_palette_adapts_to_the_terminal_background__light_tints_are_pale() {
+    let mut app = app();
+    app.palette = Palette::new(PaletteChoice::Default, Background::Light);
+    on_requirement(&mut app, "Flat index of all routes and pages");
+    let buf = buffer(&mut app);
+    assert_eq!(
+        cell(&buf, "a page sits under a nested route", DETAIL).bg,
+        Color::Indexed(194),
+        "an added line on a light terminal is tinted pale green"
+    );
+    assert_eq!(cell(&buf, "website.", DETAIL).bg, Color::Indexed(224));
+    assert_eq!(
+        cell(&buf, "approved", 0).bg,
+        Color::Indexed(189),
+        "the status bar and cursor row are tinted pale blue"
+    );
+    let light = Palette::new(PaletteChoice::Accessible, Background::Light);
+    assert_eq!(light.added_span().bg, Some(Color::Indexed(153)));
+    assert_eq!(light.removed_span().bg, Some(Color::Indexed(223)));
+    assert_eq!(
+        openspec_reviewer::render::colour::ansi::sgr(light.added_span()),
+        "\x1b[1;48;5;153m",
+        "plain output writes the 256-colour tint"
+    );
+}
+
+#[test]
 fn the_palette_adapts_to_the_terminal_background__no_answer() {
     assert_eq!(take_reply(b""), None);
     assert_eq!(take_reply(b"\x1b]11;rgb:0000/0000"), None, "unterminated");
@@ -309,7 +336,7 @@ fn three_palettes__accessible_added_line() {
     );
     assert_eq!(cell(&buf, "website.", DETAIL).bg, Color::Yellow);
     let light = Palette::new(PaletteChoice::Accessible, Background::Light);
-    assert_eq!(light.removed_span().bg, Some(Color::Magenta));
+    assert_eq!(light.removed().fg, Some(Color::Magenta));
 }
 
 #[test]

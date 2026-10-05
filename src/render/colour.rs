@@ -140,6 +140,26 @@ impl Palette {
         }
     }
 
+    /// The tint behind an added line. ANSI 16 colours are the theme's own
+    /// and a light theme keeps them dark, so on a light background a full
+    /// ANSI tint is dark text on a dark block. The light column uses fixed
+    /// pastels from the 256-colour cube instead, which no theme redefines.
+    fn added_tint(self) -> Color {
+        match (self.choice, self.background) {
+            (PaletteChoice::Accessible, Background::Light) => Color::Indexed(153),
+            (_, Background::Light) => Color::Indexed(194),
+            _ => self.added_colour(),
+        }
+    }
+
+    fn removed_tint(self) -> Color {
+        match (self.choice, self.background) {
+            (PaletteChoice::Accessible, Background::Light) => Color::Indexed(223),
+            (_, Background::Light) => Color::Indexed(224),
+            _ => self.removed_colour(),
+        }
+    }
+
     /// Orange has no ANSI 16 slot: yellow stands in on dark, magenta on
     /// light, where yellow is unreadable.
     fn removed_colour(self) -> Color {
@@ -167,12 +187,12 @@ impl Palette {
 
     /// The tint of an added line or span.
     pub fn added_span(self) -> Style {
-        let c = self.added_colour();
+        let c = self.added_tint();
         self.role(Paint::Bg, c, c, Modifier::BOLD)
     }
 
     pub fn removed_span(self) -> Style {
-        let c = self.removed_colour();
+        let c = self.removed_tint();
         self.role(Paint::Bg, c, c, Modifier::CROSSED_OUT)
     }
 
@@ -233,13 +253,14 @@ impl Palette {
     /// The cursor row. It sets no foreground, so the marks on the row keep
     /// their own colours under it.
     pub fn selected(self) -> Style {
-        if self.colour() {
-            Style::default()
-                .bg(Color::Blue)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().add_modifier(Modifier::REVERSED)
+        if !self.colour() {
+            return Style::default().add_modifier(Modifier::REVERSED);
         }
+        let tint = match self.background {
+            Background::Dark => Color::Blue,
+            Background::Light => Color::Indexed(189),
+        };
+        Style::default().bg(tint).add_modifier(Modifier::BOLD)
     }
 }
 
@@ -250,7 +271,13 @@ pub mod ansi {
 
     pub const RESET: &str = "\x1b[0m";
 
-    fn code(c: Color, background: bool) -> Option<u8> {
+    /// The SGR parameter for `c`: a 16-colour code, or `38;5;n` and
+    /// `48;5;n` for the 256-colour cube.
+    fn code(c: Color, background: bool) -> Option<String> {
+        if let Color::Indexed(n) = c {
+            let lead = if background { 48 } else { 38 };
+            return Some(format!("{lead};5;{n}"));
+        }
         let base = match c {
             Color::Black => 30,
             Color::Red => 31,
@@ -270,7 +297,7 @@ pub mod ansi {
             Color::White => 97,
             _ => return None,
         };
-        Some(if background { base + 10 } else { base })
+        Some((if background { base + 10 } else { base }).to_string())
     }
 
     /// The SGR sequence that turns `style` on, empty for the default style.
@@ -290,10 +317,10 @@ pub mod ansi {
             }
         }
         if let Some(n) = style.fg.and_then(|c| code(c, false)) {
-            codes.push(n.to_string());
+            codes.push(n);
         }
         if let Some(n) = style.bg.and_then(|c| code(c, true)) {
-            codes.push(n.to_string());
+            codes.push(n);
         }
         if codes.is_empty() {
             String::new()
