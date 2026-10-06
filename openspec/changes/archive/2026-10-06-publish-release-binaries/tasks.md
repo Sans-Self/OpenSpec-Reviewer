@@ -17,4 +17,4 @@
 
 - [x] 4.1 Validate the OpenSpec change and review it with `openspec-reviewer`.
 - [x] 4.2 Run formatting, tests, Clippy, the cargo-dist plan, and the Nix build.
-- [ ] 4.3 Publish v1.0.1 and verify its archives, checksums, installer, and provenance.
+- [x] 4.3 Publish v1.0.1 and verify its archives, checksums, installer, and provenance.
