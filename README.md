@@ -1,5 +1,7 @@
 <h1 align="center">openspec-reviewer</h1>
 
+Note: this README was entirely AI-written. I will add a fully human written version soon, but the application itself is mostly done & released!
+
 <p align="center">
   Review an <a href="https://github.com/Fission-AI/OpenSpec">OpenSpec</a> change as the semantic diff it is,<br>
   not the file diff git shows.
