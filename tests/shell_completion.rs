@@ -178,10 +178,7 @@ fn a_pull_request_completes_from_gh_within_a_second__open_pull_requests() {
 #[cfg(unix)]
 fn a_pull_request_completes_from_gh_within_a_second__slow_gh() {
     let repo = Repo::new();
-    let path = stub_gh(
-        &repo,
-        "sleep 5\necho '[{\"number\":12,\"title\":\"Late\"}]'",
-    );
+    let path = stub_gh(&repo, "while :; do :; done");
     let start = Instant::now();
     let out = candidates_for(repo.root(), &path, &["gh", ""]);
     let elapsed = start.elapsed();

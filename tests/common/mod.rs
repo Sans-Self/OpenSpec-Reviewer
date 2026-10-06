@@ -218,10 +218,28 @@ fi
 cat "$dir/response.json"
 "#;
 
-/// Put the stub in front of `PATH`, once per test process. The rest of
-/// `PATH` stays, so `git` and the like still resolve.
-pub fn gh_stub() {
+static GH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub struct GhStubGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    original_path: Option<std::ffi::OsString>,
+}
+
+impl Drop for GhStubGuard {
+    fn drop(&mut self) {
+        match &self.original_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+}
+
+/// Put the stub in front of `PATH` for one test. The lock keeps parallel
+/// tests from observing this process-wide environment change.
+pub fn gh_stub() -> GhStubGuard {
     use std::sync::OnceLock;
+    let lock = GH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let original_path = std::env::var_os("PATH");
     static STUB: OnceLock<()> = OnceLock::new();
     STUB.get_or_init(|| {
         use std::os::unix::fs::PermissionsExt;
@@ -230,9 +248,18 @@ pub fn gh_stub() {
         let path = dir.join("gh");
         std::fs::write(&path, GH_STUB).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let rest = std::env::var("PATH").unwrap_or_default();
-        std::env::set_var("PATH", format!("{}:{rest}", dir.display()));
     });
+    let dir = std::env::temp_dir().join(format!("openspec-reviewer-gh-{}", std::process::id()));
+    let rest = std::env::var("PATH").unwrap_or_default();
+    std::env::set_var("PATH", format!("{}:{rest}", dir.display()));
+    GhStubGuard {
+        _lock: lock,
+        original_path,
+    }
+}
+
+pub fn gh_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    GH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Repo {

@@ -1,24 +1,15 @@
 {
   description = "openspec-reviewer — a terminal reviewer for OpenSpec changes";
 
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-  };
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =
-    { self, nixpkgs, rust-overlay }:
+    { self, nixpkgs }:
     let
       systems = [ "aarch64-darwin" "x86_64-linux" ];
       forAll = f:
         nixpkgs.lib.genAttrs systems (system:
-          f (import nixpkgs {
-            inherit system;
-            overlays = [ (import rust-overlay) ];
-          }));
+          f (import nixpkgs { inherit system; }));
       # OpenSpec CLI for openspec/ specs and changes. Not in nixpkgs; a
       # version-pinned dlx wrapper gives every shell a bare `openspec`
       # without making Node part of the project. First run downloads into
@@ -30,10 +21,8 @@
     {
       packages = forAll (pkgs:
         let
-          rust = pkgs.rust-bin.stable.latest.default;
-          rustPlatform = pkgs.makeRustPlatform { cargo = rust; rustc = rust; };
           cargo = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package;
-          reviewer = rustPlatform.buildRustPackage {
+          reviewer = pkgs.rustPlatform.buildRustPackage {
             pname = cargo.name;
             version = cargo.version;
             src = ./.;
@@ -52,13 +41,17 @@
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            (pkgs.rust-bin.stable.latest.default.override {
-              extensions = [ "rust-src" "rust-analyzer" ];
-            })
+            pkgs.cargo
+            pkgs.clippy
             pkgs.gh
             pkgs.git
+            pkgs.rust-analyzer
+            pkgs.rustc
+            pkgs.rustfmt
             (openspecCli pkgs)
           ];
+
+          RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
 
           # openspec 1.6.0 ships telemetry on by default and routes it
           # through edge.openspec.dev, which its own source says is "to

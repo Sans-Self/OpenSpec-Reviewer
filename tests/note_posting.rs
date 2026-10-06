@@ -241,7 +241,7 @@ fn quitting_a_pull_request_review_offers_to_post_the_notes__not_a_pull_request()
 
 #[test]
 fn quitting_a_pull_request_review_offers_to_post_the_notes__everything_already_posted() {
-    gh_stub();
+    let _gh = gh_stub();
     let repo = pr_repo();
     let mut app = app_for(&repo);
     let row = requirement_row(&app, "Rows can be filtered");
@@ -361,7 +361,7 @@ fn notes_post_as_one_review_of_comments__outdated_note() {
 
 #[test]
 fn a_rejected_review_is_retried_in_the_body__line_outside_the_diff() {
-    gh_stub();
+    let _gh = gh_stub();
     let repo = pr_repo();
     repo.gh("reject-first", "");
     let mut app = app_for(&repo);
@@ -390,7 +390,7 @@ fn a_rejected_review_is_retried_in_the_body__line_outside_the_diff() {
 
 #[test]
 fn a_failed_post_keeps_the_view_open__gh_fails() {
-    gh_stub();
+    let _gh = gh_stub();
     let repo = pr_repo();
     repo.gh("fail", "gh: could not reach github.com\n");
     let mut app = app_for(&repo);
@@ -423,7 +423,7 @@ fn a_failed_post_keeps_the_view_open__gh_fails() {
 
 #[test]
 fn a_failed_post_keeps_the_view_open__posted() {
-    gh_stub();
+    let _gh = gh_stub();
     let repo = pr_repo();
     let mut app = app_for(&repo);
     let row = requirement_row(&app, "Rows can be filtered");
@@ -447,7 +447,7 @@ fn a_failed_post_keeps_the_view_open__posted() {
 
 #[test]
 fn a_note_remembers_where_it_was_posted__posted_and_reopened() {
-    gh_stub();
+    let _gh = gh_stub();
     let repo = pr_repo();
     let mut app = app_for(&repo);
     let row = requirement_row(&app, "Rows can be filtered");
@@ -463,7 +463,7 @@ fn a_note_remembers_where_it_was_posted__posted_and_reopened() {
 
 #[test]
 fn a_note_remembers_where_it_was_posted__edited_after_posting() {
-    gh_stub();
+    let _gh = gh_stub();
     let repo = pr_repo();
     let mut app = app_for(&repo);
     let row = requirement_row(&app, "Rows can be filtered");

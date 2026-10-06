@@ -283,7 +283,7 @@ fn the_git_source_reads_two_refs__unknown_ref() {
 
 #[test]
 fn the_gh_source_reads_a_pull_request__open_pull_request() {
-    gh_stub();
+    let _gh = gh_stub();
     let repo = branch_repo();
     let patch = repo.git(&["diff", "main...feature/foo"]);
     repo.gh("pr.diff", &patch).gh(
@@ -316,6 +316,7 @@ fn the_gh_source_reads_a_pull_request__open_pull_request() {
 
 #[test]
 fn the_gh_source_reads_a_pull_request__gh_missing() {
+    let _gh = gh_test_lock();
     let repo = Repo::new();
     let out = std::process::Command::new(exe())
         .args(["gh", "1"])

@@ -23,8 +23,18 @@ struct PrView {
     head_ref_oid: String,
 }
 
+fn command() -> Result<Command, SourceError> {
+    let Some(path) = std::env::var_os("PATH") else {
+        return Err(SourceError::GhMissing);
+    };
+    if !std::env::split_paths(&path).any(|dir| dir.join("gh").is_file()) {
+        return Err(SourceError::GhMissing);
+    }
+    Ok(Command::new("gh"))
+}
+
 fn run(root: &Path, args: &[&str]) -> Result<Vec<u8>, SourceError> {
-    let out = Command::new("gh")
+    let out = command()?
         .args(args)
         .current_dir(root)
         .output()
@@ -92,7 +102,7 @@ pub fn post_review(
 
 /// One `gh api ... --input -`, answering with the review's `html_url`.
 fn send(root: &Path, endpoint: &str, payload: &serde_json::Value) -> Result<String, SourceError> {
-    let mut child = Command::new("gh")
+    let mut child = command()?
         .args(["api", endpoint, "--method", "POST", "--input", "-"])
         .current_dir(root)
         .stdin(Stdio::piped())

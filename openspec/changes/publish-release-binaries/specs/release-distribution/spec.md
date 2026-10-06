@@ -33,7 +33,7 @@ The release workflow MUST publish a shell installer that maps the host operating
 - **THEN** the installer exits without installing a different platform's binary
 
 ### Requirement: Nix installation preserves release inputs
-The documented flake input MUST retain the reviewer's locked `nixpkgs` and Rust overlay revisions.
+The documented flake input MUST retain the reviewer's locked build inputs.
 
 #### Scenario: A project adds the reviewer flake
 - **WHEN** the project evaluates the documented input
